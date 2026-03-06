@@ -51,3 +51,10 @@ export const usePublicFolderData = (
       enabled: !!username && !!folderId && (options?.enabled ?? true),
     },
   });
+
+export const useUser = (options?: options) =>
+  useQueryCall({
+    queryKey: ["user"],
+    url: "/api/user",
+    options,
+  });

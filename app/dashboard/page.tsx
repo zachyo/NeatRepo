@@ -8,7 +8,7 @@ import DashboardStats from "@/components/dashboard/dashboard-stats";
 import RecentFolders from "@/components/dashboard/recent-folders";
 import RepositoriesTable from "@/components/dashboard/repositories-table";
 import CreateFolderDialog from "@/components/dashboard/create-folder-dialog";
-import { useFolders, useRepositories } from "@/hooks/queries";
+import { useFolders, useRepositories, useUser } from "@/hooks/queries";
 import { useDebouncedCallback } from "use-debounce-pro";
 import { toast } from "sonner";
 import {
@@ -36,6 +36,8 @@ export default function DashboardPage() {
   } = useFolders({
     queryParams: { search: "" },
   });
+
+  const { data: userData } = useUser();
 
   const {
     data: reposData,
@@ -178,6 +180,12 @@ export default function DashboardPage() {
           New Folder
         </Button>
       </div>
+      {userData?.username && (
+        <div className="text-3xl font-bold text-gray-900 mb-6">
+          Welcome, {userData.username?.slice(0, 1).toUpperCase()}
+          {userData.username?.slice(1)}!
+        </div>
+      )}
 
       {/* Top Stats Cards */}
       <DashboardStats
