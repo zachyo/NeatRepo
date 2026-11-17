@@ -12,6 +12,8 @@ import {
   ExternalLink,
   X,
   ChevronRight,
+  Globe,
+  Lock,
 } from "lucide-react";
 import FolderRepositoriesTable from "@/components/dashboard/folder-repositories-table";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -71,75 +73,78 @@ export default function FolderDetailPage({ params }: PageProps) {
 
   if (!folder) {
     return (
-      <div className="max-w-7xl mx-auto space-y-8">
-        <Card className="bg-white border-gray-200 p-8">
+      <div className="mx-auto max-w-7xl">
+        <Card className="rounded-xl border-dashed border-gray-300 bg-white px-6 py-12 shadow-none">
           <div className="flex flex-col items-center justify-center text-center">
-            <p className="text-gray-500 font-medium">Folder not found</p>
-            <Link href="/dashboard/folders">
-              <Button className="mt-4 bg-blue-600 hover:bg-blue-700">
-                Back to Folders
-              </Button>
-            </Link>
+            <p className="font-medium text-gray-900">Folder not found</p>
+            <p className="mt-1 text-sm text-gray-500">
+              It may have been deleted, or it belongs to another account.
+            </p>
+            <Button className="mt-4 bg-blue-600 hover:bg-blue-700" asChild>
+              <Link href="/dashboard/folders">Back to folders</Link>
+            </Button>
           </div>
         </Card>
       </div>
     );
   }
 
+  const repoCount = folder.folder_repos?.length || 0;
+
   return (
-    <div className="max-w-7xl mx-auto space-y-8">
-      {/* Header with Breadcrumb */}
-      <div className="flex flex-col gap-4 mt-3">
-        <div className="flex items-center gap-4">
+    <div className="mx-auto max-w-7xl space-y-6">
+      {/* Breadcrumb + title */}
+      <div className="space-y-3">
+        <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-sm text-gray-500">
           <button
+            type="button"
             onClick={() => router.back()}
-            className="p-2 hover:bg-gray-100 rounded-lg transition"
+            aria-label="Go back"
+            className="-ml-2 mr-1 flex size-8 items-center justify-center rounded-lg transition-colors hover:bg-gray-100 hover:text-gray-900"
           >
-            <ArrowLeft className="w-5 h-5 text-gray-600" />
+            <ArrowLeft className="size-4" />
           </button>
-          <div className="flex items-center gap-2 text-base text-gray-600">
-            <Link
-              href="/dashboard/folders"
-              className="hover:text-blue-600 font-semibold"
-            >
-              Folders
-            </Link>
-            <span>
-              <ChevronRight className="w-5 h-5 text-gray-600" />
-            </span>
-            <span>{folder.name}</span>
+          <Link href="/dashboard/folders" className="transition-colors hover:text-gray-900">
+            Folders
+          </Link>
+          <ChevronRight className="size-4 text-gray-400" />
+          <span aria-current="page" className="truncate font-medium text-gray-900">
+            {folder.name}
+          </span>
+        </nav>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="flex size-10 items-center justify-center rounded-lg bg-blue-50 text-xl">
+            {folder.icon || "📁"}
+          </span>
+          <div className="min-w-0">
+            <h2 className="truncate text-2xl font-semibold text-gray-900">{folder.name}</h2>
+            <p className="flex items-center gap-2 text-sm text-gray-500">
+              <span className="tabular-nums">
+                {repoCount} {repoCount === 1 ? "repository" : "repositories"}
+              </span>
+              <span aria-hidden>·</span>
+              <span className="inline-flex items-center gap-1">
+                {folder.is_public ? (
+                  <>
+                    <Globe className="size-3.5" /> Public
+                  </>
+                ) : (
+                  <>
+                    <Lock className="size-3.5" /> Private
+                  </>
+                )}
+              </span>
+            </p>
           </div>
         </div>
-        <div className="hidden">
-          <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
-            <span className="text-3xl">{folder.icon || "📁"}</span>
-            {folder.name}
-          </h1>
-        </div>
       </div>
 
-      {/* Info Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="bg-white border-gray-200 p-6">
-          <p className="text-sm text-gray-600">Total Repositories</p>
-          <p className="text-3xl font-bold text-gray-900 mt-2">
-            {folder.folder_repos?.length || 0}
-          </p>
-        </Card>
-      </div>
-
-      {/* Repositories List */}
-      <div className="space-y-4">
-        <h2 className="text-2xl font-bold text-gray-900">
-          Repositories in this folder
-        </h2>
-
-        <FolderRepositoriesTable
-          repos={folder.folder_repos || []}
-          folderId={folderId as string}
-          onUpdate={refetch}
-        />
-      </div>
+      <FolderRepositoriesTable
+        repos={folder.folder_repos || []}
+        folderId={folderId as string}
+        onUpdate={refetch}
+      />
     </div>
   );
 }

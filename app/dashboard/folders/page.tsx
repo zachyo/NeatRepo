@@ -15,6 +15,7 @@ import {
   PinOff,
   Globe,
   Lock,
+  Search,
 } from "lucide-react";
 import CreateFolderDialog from "@/components/dashboard/create-folder-dialog";
 import EditFolderDialog from "@/components/dashboard/edit-folder-dialog";
@@ -159,21 +160,26 @@ export default function FoldersPage() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto space-y-8">
+    <div className="mx-auto max-w-7xl space-y-6">
       {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mt-5">
-        <Input
-          placeholder="Search folders..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="flex-1"
-        />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative flex-1 sm:max-w-sm">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-gray-400" />
+          <Input
+            type="search"
+            aria-label="Search folders"
+            placeholder="Search folders"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="bg-white pl-9"
+          />
+        </div>
         <Button
           onClick={() => setShowCreateDialog(true)}
-          className="bg-blue-600 text-white hover:bg-blue-700"
+          className="bg-blue-600 text-white hover:bg-blue-700 sm:ml-auto"
         >
-          <Plus className="w-4 h-4 mr-2" />
-          New Folder
+          <Plus className="mr-1 size-4" />
+          New folder
         </Button>
       </div>
 
@@ -193,13 +199,20 @@ export default function FoldersPage() {
           ))}
         </div>
       ) : filteredFolders.length === 0 ? (
-        <Card className="bg-white border-gray-200 p-8">
+        <Card className="rounded-xl border-dashed border-gray-300 bg-white px-6 py-12 shadow-none">
           <div className="flex flex-col items-center justify-center text-center">
-            <Folder className="w-12 h-12 text-gray-300 mb-4" />
-            <p className="text-gray-500 font-medium">
+            <div className="mb-4 flex size-12 items-center justify-center rounded-xl bg-blue-50">
+              <Folder className="size-6 text-blue-600" />
+            </div>
+            <p className="font-medium text-gray-900">
               {folders.length === 0
                 ? "No folders yet"
-                : "No folders match your search"}
+                : `No folders match "${search}"`}
+            </p>
+            <p className="mt-1 max-w-sm text-pretty text-sm text-gray-500">
+              {folders.length === 0
+                ? "Folders let you group repositories by project, client or anything else."
+                : "Try a different name."}
             </p>
             {folders.length === 0 && (
               <Button
@@ -207,7 +220,7 @@ export default function FoldersPage() {
                 className="mt-4 bg-blue-600 hover:bg-blue-700"
               >
                 <Plus className="w-4 h-4 mr-2" />
-                Create your first folder
+                Create a folder
               </Button>
             )}
           </div>
@@ -216,21 +229,27 @@ export default function FoldersPage() {
         <div className="flex flex-wrap gap-4">
           {filteredFolders.map((folder) => (
             <div key={folder.id} className="group relative">
-              <Link href={`/dashboard/folders/${folder.id}`}>
-                <Card className="bg-white hover:shadow-md transition cursor-pointer h-full border-none pb-5 shadow-none">
+              <Link
+                href={`/dashboard/folders/${folder.id}`}
+                className="block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+              >
+                <Card className="h-full cursor-pointer rounded-xl border-none bg-transparent pb-4 shadow-none transition-colors hover:bg-white">
                   <div className="relative">
                     <Image
                       src={folderIcon}
                       alt={folder.name}
                       className="w-28 h-28 md:w-48 md:h-48"
                     />
-                    <div className="absolute top-1 md:top-6 right-4 md:right-7 flex items-center gap-1 text-xs md:text-sm text-gray-600 mt-4 pt-4 border-t border-gray-100">
+                    <div className="absolute right-4 top-9 flex items-center gap-1 text-xs tabular-nums text-gray-700 md:right-7 md:top-14 md:text-sm">
                       <GitBranch className="w-3.5 h-3.5 md:w-4 md:h-4 flex-shrink-0" />
                       <span>{folder.repo_count || 0}</span>
                     </div>
                     {folder.is_pinned && (
-                      <div className="absolute top-2 left-2 p-1.5 bg-blue-100/80 backdrop-blur-sm rounded-md text-blue-600">
-                        <Pin className="w-4 h-4 fill-current" />
+                      <div
+                        aria-label="Pinned"
+                        className="absolute left-2 top-2 rounded-md bg-white/90 p-1.5 text-amber-500 shadow-sm"
+                      >
+                        <Pin className="size-4 fill-current" />
                       </div>
                     )}
                   </div>
@@ -252,13 +271,16 @@ export default function FoldersPage() {
               </Link>
 
               {/* Hover Actions */}
-              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition flex gap-1">
+              <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
                 <button
+                  type="button"
                   onClick={(e) => handleTogglePin(e, folder)}
-                  className={`p-2 rounded-lg bg-white border border-gray-200 hover:bg-blue-50 transition ${
+                  aria-label={folder.is_pinned ? `Unpin ${folder.name}` : `Pin ${folder.name}`}
+                  aria-pressed={!!folder.is_pinned}
+                  className={`rounded-lg border border-gray-200 bg-white p-2 shadow-sm transition-colors hover:bg-gray-50 ${
                     folder.is_pinned
-                      ? "text-blue-600"
-                      : "text-gray-400 hover:text-blue-600"
+                      ? "text-amber-500"
+                      : "text-gray-500 hover:text-gray-900"
                   }`}
                   title={folder.is_pinned ? "Unpin folder" : "Pin folder"}
                 >
@@ -269,15 +291,20 @@ export default function FoldersPage() {
                   )}
                 </button>
                 <button
+                  type="button"
                   onClick={() => setFolderToEdit(folder)}
-                  className="p-2 rounded-lg bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 transition"
+                  aria-label={`Edit ${folder.name}`}
+                  className="rounded-lg border border-gray-200 bg-white p-2 text-gray-500 shadow-sm transition-colors hover:bg-gray-50 hover:text-gray-900"
                   title="Edit folder"
                 >
                   <Edit2 className="w-4 h-4" />
                 </button>
                 <button
+                  type="button"
                   onClick={() => setFolderToDelete(folder.id)}
-                  className="p-2 rounded-lg bg-white border border-gray-200 hover:bg-red-50 text-red-600 hover:border-red-300"
+                  aria-label={`Delete ${folder.name}`}
+                  className="rounded-lg border border-gray-200 bg-white p-2 text-gray-500 shadow-sm transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                  title="Delete folder"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>

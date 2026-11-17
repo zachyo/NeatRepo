@@ -1,25 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import RepositoriesTable from "@/components/dashboard/repositories-table";
 import AddRepoDialog from "@/components/dashboard/add-repo-dialog";
 import { Plus } from "lucide-react";
-import {
-  useFolders,
-  useRepoLanguages,
-  useRepositories,
-} from "@/hooks/queries";
+import { useFolders, useRepositories } from "@/hooks/queries";
+import RepoFilters from "@/components/dashboard/repo-filters";
 import { toast } from "sonner";
 import { useDebouncedCallback } from "use-debounce-pro";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 interface Folder {
   id: string;
@@ -42,9 +31,6 @@ export default function RepositoriesPage() {
   } = useFolders({
     queryParams: { search: "" },
   });
-
-  const { data: languagesData } = useRepoLanguages();
-  const languages: string[] = Array.isArray(languagesData) ? languagesData : [];
 
   const {
     data: reposData,
@@ -93,111 +79,34 @@ export default function RepositoriesPage() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto space-y-8">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mt-5">
-        <h1 className="text-2xl font-bold text-gray-900 hidden">
-          Repositories
-        </h1>
-        <div className="flex-1 w-full md:max-w-md">
-          <Input
-            placeholder="Search by repo name or owner..."
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(1);
-            }}
-            className="w-full"
-          />
-        </div>
-        <Button
-          onClick={() => setShowAddRepo(true)}
-          className="bg-blue-600 text-white hover:bg-blue-700 w-full md:w-auto mt-2 md:mt-0"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          Add Repository
-        </Button>
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3">
-        <Select
-          value={filterFolder}
-          onValueChange={(v) => {
-            setFilterFolder(v);
-            setPage(1);
-          }}
-        >
-          <SelectTrigger className="w-[160px] bg-white">
-            <SelectValue placeholder="All Folders" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Folders</SelectItem>
-            {foldersData?.map((folder: any) => (
-              <SelectItem key={folder.id} value={folder.id}>
-                {folder.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select
-          value={filterLanguage}
-          onValueChange={(v) => {
-            setFilterLanguage(v);
-            setPage(1);
-          }}
-        >
-          <SelectTrigger className="w-[140px] bg-white">
-            <SelectValue placeholder="Language" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Languages</SelectItem>
-            {languages.map((lang) => (
-              <SelectItem key={lang} value={lang}>
-                {lang}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select
-          value={filterDate}
-          onValueChange={(v) => {
-            setFilterDate(v);
-            setPage(1);
-          }}
-        >
-          <SelectTrigger className="w-[140px] bg-white">
-            <SelectValue placeholder="Updated Date" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Any time</SelectItem>
-            <SelectItem value="7d">Last 7 days</SelectItem>
-            <SelectItem value="30d">Last 30 days</SelectItem>
-            <SelectItem value="1y">Last Year</SelectItem>
-          </SelectContent>
-        </Select>
-
-        <Select
-          value={filterStars}
-          onValueChange={(v) => {
-            setFilterStars(v);
-            setPage(1);
-          }}
-        >
-          <SelectTrigger className="w-[140px] bg-white">
-            <SelectValue placeholder="Stars" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Any Stars</SelectItem>
-            <SelectItem value="10">&gt; 10 Stars</SelectItem>
-            <SelectItem value="50">&gt; 50 Stars</SelectItem>
-            <SelectItem value="100">&gt; 100 Stars</SelectItem>
-            <SelectItem value="1000">&gt; 1000 Stars</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+    <div className="mx-auto max-w-7xl space-y-6">
+      <RepoFilters
+        values={{
+          search: search,
+          folder: filterFolder,
+          language: filterLanguage,
+          date: filterDate,
+          stars: filterStars,
+        }}
+        onChange={(next) => {
+          if (next.search !== undefined) setSearch(next.search);
+          if (next.folder !== undefined) setFilterFolder(next.folder);
+          if (next.language !== undefined) setFilterLanguage(next.language);
+          if (next.date !== undefined) setFilterDate(next.date);
+          if (next.stars !== undefined) setFilterStars(next.stars);
+          setPage(1);
+        }}
+        folders={foldersData ?? []}
+        actions={
+          <Button
+            onClick={() => setShowAddRepo(true)}
+            className="w-full bg-blue-600 text-white hover:bg-blue-700 sm:w-auto"
+          >
+            <Plus className="mr-1 size-4" />
+            Add repository
+          </Button>
+        }
+      />
 
       {/* Repositories Table */}
       <RepositoriesTable

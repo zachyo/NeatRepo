@@ -187,7 +187,7 @@ export default function PublicFolderPage({ params }: PageProps) {
                       </TableCell>
                       <TableCell className="text-center">
                         <div className="flex items-center justify-center gap-1.5 text-gray-600">
-                          <Star className="w-3.5 h-3.5 fill-current text-gray-400 group-hover:text-yellow-500 transition-colors" />
+                          <Star className="w-3.5 h-3.5 fill-current text-gray-400 group-hover:text-amber-500 transition-colors" />
                           <span className="text-sm font-medium">
                             {repo.stars || 0}
                           </span>

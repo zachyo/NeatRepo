@@ -4,7 +4,8 @@ import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { GitBranch, Star, ExternalLink, X, Trash2 } from "lucide-react";
+import { GitBranch, Star, ExternalLink, X, Trash2, Lock } from "lucide-react";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -103,13 +104,18 @@ export default function FolderRepositoriesTable({
 
   if (repos.length === 0) {
     return (
-      <Card className="bg-white border-gray-200 p-8">
+      <Card className="rounded-xl border-dashed border-gray-300 bg-white px-6 py-12 shadow-none">
         <div className="flex flex-col items-center justify-center text-center">
-          <GitBranch className="w-12 h-12 text-gray-300 mb-4" />
-          <p className="text-gray-500 font-medium">No repositories yet</p>
-          <p className="text-sm text-gray-400 mt-1">
-            Add repositories to this folder from the dashboard
+          <div className="mb-4 flex size-12 items-center justify-center rounded-xl bg-gray-100">
+            <GitBranch className="size-6 text-gray-400" />
+          </div>
+          <p className="font-medium text-gray-900">This folder is empty</p>
+          <p className="mt-1 max-w-sm text-pretty text-sm text-gray-500">
+            Add repositories from the Repositories page using the row menu or by selecting several at once.
           </p>
+          <Button className="mt-4 bg-blue-600 hover:bg-blue-700" asChild>
+            <Link href="/dashboard/repos">Browse repositories</Link>
+          </Button>
         </div>
       </Card>
     );
@@ -118,8 +124,8 @@ export default function FolderRepositoriesTable({
   return (
     <>
       {selectedRepos.size > 0 && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 flex items-center justify-between">
-          <span className="text-sm text-red-800 font-medium">
+        <div className="mb-3 flex items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-2.5">
+          <span className="text-sm font-medium tabular-nums text-gray-700">
             {selectedRepos.size}{" "}
             {selectedRepos.size === 1 ? "repository" : "repositories"} selected
           </span>
@@ -135,10 +141,10 @@ export default function FolderRepositoriesTable({
         </div>
       )}
 
-      <Card className="bg-white border-gray-200 overflow-hidden">
+      <Card className="overflow-hidden rounded-xl border-gray-200 bg-white shadow-none">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
+            <thead className="border-b border-gray-200 bg-gray-50/80">
               <tr>
                 <th className="px-6 py-3 text-left w-12">
                   <Checkbox
@@ -149,19 +155,19 @@ export default function FolderRepositoriesTable({
                     aria-label="Select all"
                   />
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500">
                   Repository
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500">
                   Owner
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500">
                   Stars
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500">
                   Language
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500">
                   Actions
                 </th>
               </tr>
@@ -182,18 +188,32 @@ export default function FolderRepositoriesTable({
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
-                          <GitBranch className="w-4 h-4 text-blue-600" />
+                        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gray-100">
+                          <GitBranch className="size-4 text-gray-600" />
                         </div>
-                        <div>
-                          <a
-                            href={repo.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="font-medium text-blue-600 hover:text-blue-700 truncate"
-                          >
-                            {repo.name}
-                          </a>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <a
+                              href={repo.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="truncate font-medium text-gray-900 hover:text-blue-600 hover:underline"
+                            >
+                              {repo.name}
+                            </a>
+                            {repo.private && (
+                              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-gray-200 px-1.5 py-px text-[11px] text-gray-500">
+                                <Lock className="size-2.5" />
+                                Private
+                              </span>
+                            )}
+                            {repo.is_favorite && (
+                              <Star
+                                aria-label="Favorite"
+                                className="size-3.5 shrink-0 fill-amber-400 text-amber-500"
+                              />
+                            )}
+                          </div>
                           {repo.description && (
                             <p className="text-sm text-gray-500 truncate max-w-xs">
                               {repo.description}
@@ -206,14 +226,14 @@ export default function FolderRepositoriesTable({
                       {repo.full_name?.split("/")[0]}
                     </td>
                     <td className="px-6 py-4">
-                      <div className="flex items-center gap-1 text-sm text-gray-600">
-                        <Star className="w-4 h-4 text-yellow-500" />
-                        {repo.stars || 0}
+                      <div className="flex items-center gap-1 text-sm tabular-nums text-gray-600">
+                        <Star className="size-3.5 text-gray-400" />
+                        {(repo.stars || 0).toLocaleString()}
                       </div>
                     </td>
                     <td className="px-6 py-4">
                       {repo.language ? (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700">
                           {repo.language}
                         </span>
                       ) : (
@@ -226,15 +246,18 @@ export default function FolderRepositoriesTable({
                           href={repo.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="p-2 hover:bg-gray-200 rounded-lg transition text-gray-600"
-                          title="View on GitHub"
+                          className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900"
+                          title="Open on GitHub"
+                          aria-label={`Open ${repo.name} on GitHub`}
                         >
                           <ExternalLink className="w-4 h-4" />
                         </a>
                         <button
+                          type="button"
                           onClick={() => confirmRemoveSingle(repo.id)}
-                          className="p-2 hover:bg-red-100 rounded-lg transition text-red-600"
+                          className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600"
                           title="Remove from folder"
+                          aria-label={`Remove ${repo.name} from folder`}
                         >
                           <X className="w-4 h-4" />
                         </button>
