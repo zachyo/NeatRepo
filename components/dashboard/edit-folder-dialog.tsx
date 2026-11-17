@@ -12,13 +12,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Globe, Lock } from "lucide-react";
 
 interface EditFolderDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   folderId: string;
   initialName: string;
-  onEditFolder: (id: string, name: string) => Promise<void>;
+  initialIsPublic?: boolean;
+  onEditFolder: (id: string, name: string, isPublic: boolean) => Promise<void>;
 }
 
 export default function EditFolderDialog({
@@ -26,23 +29,28 @@ export default function EditFolderDialog({
   onOpenChange,
   folderId,
   initialName,
+  initialIsPublic = false,
   onEditFolder,
 }: EditFolderDialogProps) {
   const [folderName, setFolderName] = useState(initialName);
+  const [isPublic, setIsPublic] = useState(initialIsPublic);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (open) {
       setFolderName(initialName);
+      setIsPublic(initialIsPublic);
     }
-  }, [open, initialName]);
+  }, [open, initialName, initialIsPublic]);
+
+  const unchanged = folderName === initialName && isPublic === initialIsPublic;
 
   const handleEdit = async () => {
-    if (!folderName.trim() || folderName === initialName) return;
+    if (!folderName.trim() || unchanged) return;
 
     try {
       setLoading(true);
-      await onEditFolder(folderId, folderName);
+      await onEditFolder(folderId, folderName.trim(), isPublic);
       onOpenChange(false);
     } catch (error) {
       console.error("Error editing folder:", error);
@@ -57,7 +65,7 @@ export default function EditFolderDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Edit Folder</AlertDialogTitle>
           <AlertDialogDescription>
-            Change the name of your folder
+            Rename your folder or change who can see it
           </AlertDialogDescription>
         </AlertDialogHeader>
 
@@ -73,12 +81,28 @@ export default function EditFolderDialog({
                 if (
                   e.key === "Enter" &&
                   folderName.trim() &&
-                  folderName !== initialName
+                  !unchanged
                 ) {
                   handleEdit();
                 }
               }}
             />
+          </div>
+          <div className="flex items-start justify-between gap-4 rounded-lg border border-gray-200 p-3">
+            <div className="space-y-0.5">
+              <Label htmlFor="edit-folder-public" className="flex items-center gap-1.5">
+                {isPublic ? (
+                  <Globe className="h-3.5 w-3.5 text-gray-500" />
+                ) : (
+                  <Lock className="h-3.5 w-3.5 text-gray-500" />
+                )}
+                Public
+              </Label>
+              <p className="text-xs text-gray-500">
+                Show this folder on your public profile. Private repos stay hidden.
+              </p>
+            </div>
+            <Switch id="edit-folder-public" checked={isPublic} onCheckedChange={setIsPublic} />
           </div>
         </div>
 
@@ -89,7 +113,7 @@ export default function EditFolderDialog({
           <Button
             onClick={handleEdit}
             disabled={
-              !folderName.trim() || folderName === initialName || loading
+              !folderName.trim() || unchanged || loading
             }
             className="bg-blue-600 hover:bg-blue-700"
           >

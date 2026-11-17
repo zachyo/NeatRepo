@@ -1,15 +1,13 @@
-import { createClient } from "@supabase/supabase-js";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
+import { firstIssue, folderAddRepoSchema } from "@/lib/validation";
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ folderId: string }> },
 ) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-    process.env.SUPABASE_SERVICE_KEY || "",
-  );
+  const supabase = createAdminClient();
 
   try {
     const userId = await getCurrentUser();
@@ -18,14 +16,11 @@ export async function POST(
     }
 
     const { folderId } = await params;
-    const { repoId } = await req.json();
-
-    if (!repoId) {
-      return NextResponse.json(
-        { error: "Repo ID is required" },
-        { status: 400 },
-      );
+    const parsed = folderAddRepoSchema.safeParse(await req.json());
+    if (!parsed.success) {
+      return NextResponse.json({ error: firstIssue(parsed.error) }, { status: 400 });
     }
+    const { repoId } = parsed.data;
 
     // Verify folder access
     const { data: folder } = await supabase
@@ -37,6 +32,18 @@ export async function POST(
 
     if (!folder) {
       return NextResponse.json({ error: "Folder not found" }, { status: 404 });
+    }
+
+    // Verify the repo belongs to the user
+    const { data: repo } = await supabase
+      .from("repositories")
+      .select("id")
+      .eq("id", repoId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (!repo) {
+      return NextResponse.json({ error: "Repository not found" }, { status: 404 });
     }
 
     // Add repo to folder
@@ -75,10 +82,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ folderId: string }> },
 ) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-    process.env.SUPABASE_SERVICE_KEY || "",
-  );
+  const supabase = createAdminClient();
 
   try {
     const userId = await getCurrentUser();

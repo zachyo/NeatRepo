@@ -1,12 +1,10 @@
-import { createClient } from "@supabase/supabase-js";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
+import { firstIssue, folderCreateSchema } from "@/lib/validation";
 
 export async function GET(req: NextRequest) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-    process.env.SUPABASE_SERVICE_KEY || "",
-  );
+  const supabase = createAdminClient();
 
   try {
     const userId = await getCurrentUser();
@@ -15,50 +13,32 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = new URL(req.url);
-    const search = searchParams.get("search") || "";
+    const search = (searchParams.get("search") || "").trim().slice(0, 100);
 
-    // Get folders for current user
+    // One query: folders plus an embedded repo count (avoids N+1)
     let query = supabase
       .from("folders")
       .select(
-        `
-        id,
-        name,
-        icon,
-        created_at,
-        updated_at,
-        last_opened,
-        is_pinned
-      `,
+        "id, name, icon, created_at, updated_at, last_opened, is_pinned, is_public, folder_repos(count)",
       )
       .eq("created_by", userId)
       .order("is_pinned", { ascending: false })
       .order("last_opened", { ascending: false });
 
     if (search) {
-      query = query.ilike("name", `%${search}%`);
+      query = query.ilike("name", `%${search.replace(/[%_\\]/g, "\\$&")}%`);
     }
 
     const { data: folders, error } = await query;
 
     if (error) throw error;
 
-    // Get repo counts for each folder
-    const foldersWithCounts = await Promise.all(
-      folders?.map(async (folder) => {
-        const { count } = await supabase
-          .from("folder_repos")
-          .select("*", { count: "exact", head: true })
-          .eq("folder_id", folder.id);
+    const result = (folders || []).map(({ folder_repos, ...folder }: any) => ({
+      ...folder,
+      repo_count: folder_repos?.[0]?.count ?? 0,
+    }));
 
-        return {
-          ...folder,
-          repo_count: count || 0,
-        };
-      }) || [],
-    );
-
-    return NextResponse.json(foldersWithCounts);
+    return NextResponse.json(result);
   } catch (error) {
     console.error("Error fetching folders:", error);
     return NextResponse.json(
@@ -69,10 +49,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-    process.env.SUPABASE_SERVICE_KEY || "",
-  );
+  const supabase = createAdminClient();
 
   try {
     const userId = await getCurrentUser();
@@ -80,11 +57,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { name, icon = "📁" } = await req.json();
-
-    if (!name) {
-      return NextResponse.json({ error: "Name is required" }, { status: 400 });
+    const parsed = folderCreateSchema.safeParse(await req.json());
+    if (!parsed.success) {
+      return NextResponse.json({ error: firstIssue(parsed.error) }, { status: 400 });
     }
+    const { name, icon = "📁", is_public = false } = parsed.data;
 
     const { data, error } = await supabase
       .from("folders")
@@ -92,6 +69,7 @@ export async function POST(req: NextRequest) {
         {
           name,
           icon,
+          is_public,
           created_by: userId,
           last_opened: new Date().toISOString(),
         },

@@ -1,14 +1,33 @@
-import { createClient } from "@supabase/supabase-js";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
+import { decryptToken } from "@/lib/crypto";
+import {
+  GITHUB_API_URL,
+  REPO_UPSERT_CONFLICT,
+  githubHeaders,
+  mapGithubRepo,
+} from "@/lib/github";
+import { firstIssue, repoAddSchema } from "@/lib/validation";
 
-const GITHUB_API_URL = "https://api.github.com";
+const PAGE_SIZE = 15;
+const DATE_RANGES = new Set(["7d", "30d", "1y", "all"]);
+
+/**
+ * Strips characters that have meaning inside a PostgREST `or=(...)` filter
+ * (`,` `(` `)` `.` `:`) or inside an ILIKE pattern (`%` `_` `*` `\`), so user
+ * input cannot break the filter or inject extra clauses.
+ */
+function sanitizeSearch(raw: string): string {
+  return raw
+    .replace(/[,().:%_*\\"']/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 100);
+}
 
 export async function GET(req: NextRequest) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-    process.env.SUPABASE_SERVICE_KEY || "",
-  );
+  const supabase = createAdminClient();
 
   try {
     const userId = await getCurrentUser();
@@ -17,14 +36,13 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = new URL(req.url);
-    const search = searchParams.get("search") || "";
+    const search = sanitizeSearch(searchParams.get("search") || "");
     const folderId = searchParams.get("folder_id");
     const language = searchParams.get("language");
-    const minStars = searchParams.get("min_stars");
+    const minStars = Number.parseInt(searchParams.get("min_stars") || "", 10);
     const dateRange = searchParams.get("date_range");
-    const page = parseInt(searchParams.get("page") || "1");
-    const limit = 15;
-    const offset = (page - 1) * limit;
+    const page = Math.max(1, Number.parseInt(searchParams.get("page") || "1", 10) || 1);
+    const offset = (page - 1) * PAGE_SIZE;
 
     let query = supabase
       .from("repositories")
@@ -33,49 +51,50 @@ export async function GET(req: NextRequest) {
       .order("updated_at", { ascending: false });
 
     if (search) {
-      query = query.or(`name.ilike.%${search}%,description.ilike.%${search}%`);
+      query = query.or(`name.ilike.*${search}*,description.ilike.*${search}*`);
     }
 
     if (language) {
-      query = query.eq("language", language);
+      query = query.eq("language", language.slice(0, 50));
     }
 
-    if (minStars) {
-      query = query.gte("stars", parseInt(minStars));
+    if (Number.isFinite(minStars) && minStars > 0) {
+      query = query.gte("stars", minStars);
     }
 
-    if (dateRange) {
+    if (dateRange && DATE_RANGES.has(dateRange) && dateRange !== "all") {
       const date = new Date();
       if (dateRange === "7d") date.setDate(date.getDate() - 7);
       else if (dateRange === "30d") date.setDate(date.getDate() - 30);
       else if (dateRange === "1y") date.setFullYear(date.getFullYear() - 1);
-
-      if (dateRange !== "all") {
-        query = query.gte("updated_at", date.toISOString());
-      }
+      query = query.gte("updated_at", date.toISOString());
     }
 
     if (folderId && folderId !== "all") {
-      // Need to handle inner join for folder filtering
-      const { data: folderRepos } = await supabase
-        .from("folder_repos")
-        .select("repo_id")
-        .eq("folder_id", folderId);
+      // Only honour folders the user owns
+      const { data: folder } = await supabase
+        .from("folders")
+        .select("id, folder_repos(repo_id)")
+        .eq("id", folderId)
+        .eq("created_by", userId)
+        .maybeSingle();
 
-      const repoIds = folderRepos?.map((fr) => fr.repo_id) || [];
-      if (repoIds.length > 0) {
-        query = query.in("id", repoIds);
-      } else {
-        // Return absolutely nothing if the folder is empty
-        query = query.eq("id", "00000000-0000-0000-0000-000000000000");
+      const repoIds: string[] =
+        (folder?.folder_repos as { repo_id: string }[] | undefined)?.map(
+          (fr) => fr.repo_id,
+        ) || [];
+
+      if (repoIds.length === 0) {
+        return NextResponse.json({ repos: [], total: 0, page, limit: PAGE_SIZE });
       }
+      query = query.in("id", repoIds);
     }
 
     const {
       data: repos,
       error,
       count,
-    } = await query.range(offset, offset + limit - 1);
+    } = await query.range(offset, offset + PAGE_SIZE - 1);
 
     if (error) throw error;
 
@@ -83,7 +102,7 @@ export async function GET(req: NextRequest) {
       repos: repos || [],
       total: count || 0,
       page,
-      limit,
+      limit: PAGE_SIZE,
     });
   } catch (error) {
     console.error("Error fetching repos:", error);
@@ -94,11 +113,9 @@ export async function GET(req: NextRequest) {
   }
 }
 
+/** Adds a single GitHub repo (by owner/name) to the user's repositories. */
 export async function POST(req: NextRequest) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-    process.env.SUPABASE_SERVICE_KEY || "",
-  );
+  const supabase = createAdminClient();
 
   try {
     const userId = await getCurrentUser();
@@ -106,25 +123,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { repo_owner, repo_name } = await req.json();
+    const parsed = repoAddSchema.safeParse(await req.json());
+    if (!parsed.success) {
+      return NextResponse.json({ error: firstIssue(parsed.error) }, { status: 400 });
+    }
+    const { repo_owner, repo_name } = parsed.data;
 
-    if (!repo_owner || !repo_name) {
+    const { data: user } = await supabase
+      .from("users")
+      .select("github_access_token")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (!user?.github_access_token) {
       return NextResponse.json(
-        { error: "Owner and name are required" },
+        { error: "No GitHub token found. Please reconnect your GitHub account." },
         { status: 400 },
       );
     }
 
-    // Fetch repo details from GitHub
-    const githubToken = process.env.GITHUB_TOKEN;
     const repoResponse = await fetch(
-      `${GITHUB_API_URL}/repos/${repo_owner}/${repo_name}`,
-      {
-        headers: {
-          Authorization: githubToken ? `token ${githubToken}` : "",
-          Accept: "application/vnd.github.v3+json",
-        },
-      },
+      `${GITHUB_API_URL}/repos/${encodeURIComponent(repo_owner)}/${encodeURIComponent(repo_name)}`,
+      { headers: githubHeaders(decryptToken(user.github_access_token)) },
     );
 
     if (!repoResponse.ok) {
@@ -136,20 +156,16 @@ export async function POST(req: NextRequest) {
 
     const githubRepo = await repoResponse.json();
 
-    // Insert or update repo in database
     const { data, error } = await supabase
-      .from("github_repos")
+      .from("repositories")
       .upsert(
         {
-          user_id: userId,
-          repo_owner: githubRepo.owner.login,
-          repo_name: githubRepo.name,
-          repo_url: githubRepo.html_url,
-          description: githubRepo.description,
-          stars_count: githubRepo.stargazers_count,
-          language: githubRepo.language,
+          ...mapGithubRepo(githubRepo, userId, new Date().toISOString()),
+          added_manually: true,
         },
-        { onConflict: "user_id,repo_owner,repo_name" },
+        {
+          onConflict: REPO_UPSERT_CONFLICT,
+        },
       )
       .select()
       .single();

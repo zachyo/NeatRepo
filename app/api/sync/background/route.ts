@@ -1,14 +1,28 @@
-import { createClient } from "@supabase/supabase-js";
-import { NextRequest, NextResponse } from "next/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
+import { decryptToken } from "@/lib/crypto";
+import {
+  GITHUB_API_URL,
+  REPO_UPSERT_CONFLICT,
+  githubHeaders,
+  mapGithubRepo,
+} from "@/lib/github";
 
-const GITHUB_API_URL = "https://api.github.com";
+const PER_PAGE = 100;
+// Pages processed per request, to stay under serverless timeouts.
+const MAX_PAGES_PER_CALL = 3;
 
-export async function POST(req: NextRequest) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-    process.env.SUPABASE_SERVICE_KEY || "",
-  );
+/**
+ * Full re-sync of the user's GitHub repos, resumable across calls.
+ *
+ * A run starts at page 1 and stamps every upserted row with the run's start
+ * time. Progress is stored in users.sync_page. When the last page is reached,
+ * rows not seen during the run (deleted / transferred repos) are removed,
+ * except repos the user added by hand via POST /api/repos.
+ */
+export async function POST() {
+  const supabase = createAdminClient();
 
   try {
     const userId = await getCurrentUser();
@@ -16,116 +30,111 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Fetch the user's stored GitHub access token
     const { data: user, error: userError } = await supabase
       .from("users")
-      .select("github_access_token")
+      .select("github_access_token, sync_page, sync_run_started_at")
       .eq("id", userId)
       .single();
 
     if (userError || !user?.github_access_token) {
       return NextResponse.json(
-        {
-          error: "No GitHub token found. Please reconnect your GitHub account.",
-        },
+        { error: "No GitHub token found. Please reconnect your GitHub account." },
         { status: 400 },
       );
     }
 
-    const githubToken = user.github_access_token;
+    const githubToken = decryptToken(user.github_access_token);
 
-    // Get total count of repos stored so far
-    const { count: existingCount } = await supabase
-      .from("repositories")
-      .select("*", { count: "exact", head: true })
-      .eq("user_id", userId);
-
-    // If we already have 100 stored repos, sync subsequent pages in background.
-    // We start from page 2+ since page 1 was already synced at login.
-    let page = Math.floor((existingCount || 0) / 100) + 1;
-    if (page <= 1) page = 2; // Always start from page 2 at minimum
+    // Resume the current run, or start a new one
+    let page: number = user.sync_page ?? 1;
+    let runStartedAt: string = user.sync_run_started_at;
+    if (!user.sync_page || !runStartedAt) {
+      page = 1;
+      runStartedAt = new Date().toISOString();
+    }
 
     let totalSynced = 0;
-    let hasMore = true;
+    let finished = false;
 
-    // Limit per background call to avoid timeout (3 pages max = 300 repos)
-    const MAX_PAGES = 3;
-    let pagesProcessed = 0;
-
-    while (hasMore && pagesProcessed < MAX_PAGES) {
+    for (let i = 0; i < MAX_PAGES_PER_CALL; i++) {
       const response = await fetch(
-        `${GITHUB_API_URL}/user/repos?per_page=100&sort=updated&page=${page}`,
-        {
-          headers: {
-            Authorization: `Bearer ${githubToken}`,
-            Accept: "application/json",
-          },
-        },
+        `${GITHUB_API_URL}/user/repos?per_page=${PER_PAGE}&sort=full_name&page=${page}`,
+        { headers: githubHeaders(githubToken) },
       );
 
       if (!response.ok) {
         if (response.status === 401) {
-          // Token expired/revoked — clear it
           await supabase
             .from("users")
-            .update({ github_access_token: null })
+            .update({
+              github_access_token: null,
+              sync_page: null,
+              sync_run_started_at: null,
+            })
             .eq("id", userId);
           return NextResponse.json(
-            {
-              error:
-                "GitHub token expired. Please reconnect your GitHub account.",
-            },
+            { error: "GitHub token expired. Please reconnect your GitHub account." },
             { status: 401 },
           );
         }
+        // Transient failure: keep the cursor so the next call retries this page
         break;
       }
 
       const repos = await response.json();
+      if (!Array.isArray(repos)) break;
 
-      if (!repos || repos.length === 0) {
-        hasMore = false;
-        break;
+      if (repos.length > 0) {
+        const { error: upsertError } = await supabase
+          .from("repositories")
+          .upsert(
+            repos.map((repo: any) => mapGithubRepo(repo, userId, runStartedAt)),
+            { onConflict: REPO_UPSERT_CONFLICT },
+          );
+
+        if (upsertError) {
+          console.error("Error upserting repos:", upsertError);
+          break;
+        }
+        totalSynced += repos.length;
       }
 
-      // Upsert this page of repos
-      const { error: upsertError } = await supabase.from("repositories").upsert(
-        repos.map((repo: any) => ({
-          github_repo_id: repo.id,
-          user_id: userId,
-          name: repo.name,
-          full_name: repo.full_name,
-          description: repo.description,
-          url: repo.html_url,
-          private: repo.private,
-          language: repo.language,
-          stars: repo.stargazers_count,
-          forks: repo.forks_count,
-          updated_at: repo.updated_at,
-          synced_at: new Date().toISOString(),
-        })),
-        { onConflict: "github_repo_id" },
-      );
-
-      if (upsertError) {
-        console.error("Error upserting repos:", upsertError);
+      if (repos.length < PER_PAGE) {
+        finished = true;
         break;
       }
-
-      totalSynced += repos.length;
-      pagesProcessed++;
       page++;
+    }
 
-      // If we got fewer than 100, there are no more pages
-      if (repos.length < 100) {
-        hasMore = false;
-      }
+    if (finished) {
+      // Remove repos that no longer exist on GitHub (folder links cascade)
+      const { error: pruneError } = await supabase
+        .from("repositories")
+        .delete()
+        .eq("user_id", userId)
+        .eq("added_manually", false)
+        .lt("synced_at", runStartedAt);
+      if (pruneError) console.error("Error pruning stale repos:", pruneError);
+
+      await supabase
+        .from("users")
+        .update({
+          sync_page: null,
+          sync_run_started_at: null,
+          last_synced_at: new Date().toISOString(),
+        })
+        .eq("id", userId);
+    } else {
+      await supabase
+        .from("users")
+        .update({ sync_page: page, sync_run_started_at: runStartedAt })
+        .eq("id", userId);
     }
 
     return NextResponse.json({
       success: true,
       synced: totalSynced,
-      hasMore,
+      hasMore: !finished,
     });
   } catch (error) {
     console.error("Background sync error:", error);

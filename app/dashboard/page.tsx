@@ -72,17 +72,17 @@ export default function DashboardPage() {
     filterStars,
   ]);
 
-  // Trigger background sync for repos beyond first 100
+  // Full background re-sync with GitHub (resumable; continues while hasMore)
   useEffect(() => {
     const runBackgroundSync = async () => {
       try {
-        const res = await fetch("/api/sync/background", { method: "POST" });
-        if (res.ok) {
+        for (let i = 0; i < 5; i++) {
+          const res = await fetch("/api/sync/background", { method: "POST" });
+          if (!res.ok) break;
           const result = await res.json();
-          if (result.synced > 0) {
-            refetchRepos();
-          }
+          if (!result.hasMore) break;
         }
+        refetchRepos();
       } catch (e) {
         // Silent fail for background sync
       }
@@ -90,12 +90,12 @@ export default function DashboardPage() {
     runBackgroundSync();
   }, []);
 
-  const handleCreateFolder = async (name: string) => {
+  const handleCreateFolder = async (name: string, isPublic = false) => {
     try {
       const response = await fetch("/api/folders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, is_public: isPublic }),
       });
 
       if (response.ok) {

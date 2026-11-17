@@ -26,6 +26,7 @@ function GitHubCallbackContent() {
 
   useEffect(() => {
     const code = searchParams.get("code");
+    const state = searchParams.get("state");
     const errParam = searchParams.get("error");
 
     if (errParam) {
@@ -48,7 +49,7 @@ function GitHubCallbackContent() {
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ code }),
+          body: JSON.stringify({ code, state }),
         });
 
         if (response.ok) {

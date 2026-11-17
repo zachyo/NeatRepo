@@ -1,24 +1,21 @@
-import { createClient } from "@supabase/supabase-js";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ username: string; folderId: string }> },
 ) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-    process.env.SUPABASE_SERVICE_ROLE_KEY || "",
-  );
+  const supabase = createAdminClient();
 
   const { username, folderId } = await params;
 
   // 1. Fetch user by username, only if profile is public
   const { data: user, error: userError } = await supabase
     .from("users")
-    .select("id, username, is_public")
+    .select("id")
     .eq("username", username)
     .eq("is_public", true)
-    .single();
+    .maybeSingle();
 
   if (userError || !user) {
     return NextResponse.json(
@@ -26,24 +23,21 @@ export async function GET(
       { status: 404 },
     );
   }
-  console.log(user);
 
-  // 2. Fetch the specific folder belonging to this user
+  // 2. Fetch the folder, only if it belongs to this user and is public
   const { data: folder, error: folderError } = await supabase
     .from("folders")
     .select("id, name, icon, is_pinned, created_at")
     .eq("id", folderId)
     .eq("created_by", user.id)
-    .single();
-
-  console.log(folder);
+    .eq("is_public", true)
+    .maybeSingle();
 
   if (folderError || !folder) {
     return NextResponse.json({ error: "Folder not found" }, { status: 404 });
   }
 
   // 3. Fetch the repositories in this folder
-  // Get the link entries first
   const { data: folderRepos, error: linkError } = await supabase
     .from("folder_repos")
     .select("repo_id")
@@ -57,12 +51,15 @@ export async function GET(
   }
 
   let repos: any[] = [];
-  if (folderRepos && folderRepos.length > 0) {
-    const repoIds = folderRepos.map((fr) => fr.repo_id);
+  const repoIds = (folderRepos || []).map((fr) => fr.repo_id);
+  if (repoIds.length > 0) {
+    // Private repos are never shown on public pages
     const { data: reposData, error: reposError } = await supabase
       .from("repositories")
       .select("id, name, full_name, description, url, language, stars")
       .in("id", repoIds)
+      .eq("user_id", user.id)
+      .eq("private", false)
       .order("name", { ascending: true });
 
     if (!reposError && reposData) {
@@ -73,5 +70,6 @@ export async function GET(
   return NextResponse.json({
     folder,
     repos,
+    hidden_private_count: Math.max(0, repoIds.length - repos.length),
   });
 }

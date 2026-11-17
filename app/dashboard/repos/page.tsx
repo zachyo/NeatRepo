@@ -6,7 +6,11 @@ import { Button } from "@/components/ui/button";
 import RepositoriesTable from "@/components/dashboard/repositories-table";
 import AddRepoDialog from "@/components/dashboard/add-repo-dialog";
 import { Plus } from "lucide-react";
-import { useFolders, useRepositories } from "@/hooks/queries";
+import {
+  useFolders,
+  useRepoLanguages,
+  useRepositories,
+} from "@/hooks/queries";
 import { toast } from "sonner";
 import { useDebouncedCallback } from "use-debounce-pro";
 import {
@@ -38,6 +42,9 @@ export default function RepositoriesPage() {
   } = useFolders({
     queryParams: { search: "" },
   });
+
+  const { data: languagesData } = useRepoLanguages();
+  const languages: string[] = Array.isArray(languagesData) ? languagesData : [];
 
   const {
     data: reposData,
@@ -146,13 +153,11 @@ export default function RepositoriesPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Languages</SelectItem>
-            <SelectItem value="TypeScript">TypeScript</SelectItem>
-            <SelectItem value="JavaScript">JavaScript</SelectItem>
-            <SelectItem value="Python">Python</SelectItem>
-            <SelectItem value="Rust">Rust</SelectItem>
-            <SelectItem value="Go">Go</SelectItem>
-            <SelectItem value="HTML">HTML</SelectItem>
-            <SelectItem value="CSS">CSS</SelectItem>
+            {languages.map((lang) => (
+              <SelectItem key={lang} value={lang}>
+                {lang}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
 

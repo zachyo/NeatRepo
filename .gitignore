@@ -6,6 +6,13 @@ __v0_jsx-dev-runtime.ts
 # Common ignores
 node_modules/
 .next/
-.env
 .DS_Store
 .vercel
+
+# Environment files (keep the template)
+.env*
+!.env.example
+
+# TypeScript build cache
+tsconfig.tsbuildinfo
+*.tsbuildinfo

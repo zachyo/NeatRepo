@@ -1,15 +1,13 @@
-import { createClient } from "@supabase/supabase-js";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
+import { firstIssue, folderUpdateSchema } from "@/lib/validation";
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ folderId: string }> },
 ) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-    process.env.SUPABASE_SERVICE_KEY || "",
-  );
+  const supabase = createAdminClient();
 
   try {
     const userId = await getCurrentUser();
@@ -18,23 +16,6 @@ export async function GET(
     }
 
     const { folderId } = await params;
-
-    // Get folder details
-    // const { data: folder, error: folderError } = await supabase
-    //   .from("folders")
-    //   .select(
-    //     `
-    //     id,
-    //     name,
-    //     icon,
-    //     created_at,
-    //     updated_at,
-    //     last_opened
-    //   `,
-    //   )
-    //   .eq("id", folderId)
-    //   .eq("created_by", userId)
-    //   .single();
 
     const { data: folder, error: folderError } = await supabase
       .from("folders")
@@ -49,36 +30,18 @@ export async function GET(
   `,
       )
       .eq("id", folderId)
-      .single();
+      .eq("created_by", userId)
+      .maybeSingle();
 
     if (folderError || !folder) {
       return NextResponse.json({ error: "Folder not found" }, { status: 404 });
     }
 
-    // Get repos in folder
-    // const { data: repos, error: reposError } = await supabase
-    //   .from('folder_repos')
-    //   .select(`
-    //     id,
-    //     github_repos (
-    //       id,
-    //       repo_name,
-    //       repo_owner,
-    //       repo_url,
-    //       description,
-    //       stars_count,
-    //       language
-    //     )
-    //   `)
-    //   .eq('folder_id', folderId);
-
-    // if (reposError) throw reposError;
-
-    // Update last_opened timestamp
     await supabase
       .from("folders")
       .update({ last_opened: new Date().toISOString() })
-      .eq("id", folderId);
+      .eq("id", folderId)
+      .eq("created_by", userId);
 
     if (folder.folder_repos) {
       folder.folder_repos.sort((a: any, b: any) => {
@@ -102,10 +65,7 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ folderId: string }> },
 ) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-    process.env.SUPABASE_SERVICE_KEY || "",
-  );
+  const supabase = createAdminClient();
 
   try {
     const userId = await getCurrentUser();
@@ -114,20 +74,11 @@ export async function PUT(
     }
 
     const { folderId } = await params;
-    const body = await req.json();
-    const { name, icon, is_pinned } = body;
-
-    // Verify folder ownership
-    const { data: folder, error: folderError } = await supabase
-      .from("folders")
-      .select("id")
-      .eq("id", folderId)
-      .eq("created_by", userId)
-      .single();
-
-    if (folderError || !folder) {
-      return NextResponse.json({ error: "Folder not found" }, { status: 404 });
+    const parsed = folderUpdateSchema.safeParse(await req.json());
+    if (!parsed.success) {
+      return NextResponse.json({ error: firstIssue(parsed.error) }, { status: 400 });
     }
+    const { name, icon, is_pinned, is_public } = parsed.data;
 
     const { data, error } = await supabase
       .from("folders")
@@ -135,13 +86,18 @@ export async function PUT(
         ...(name !== undefined && { name }),
         ...(icon !== undefined && { icon }),
         ...(is_pinned !== undefined && { is_pinned }),
+        ...(is_public !== undefined && { is_public }),
         updated_at: new Date().toISOString(),
       })
       .eq("id", folderId)
+      .eq("created_by", userId)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) throw error;
+    if (!data) {
+      return NextResponse.json({ error: "Folder not found" }, { status: 404 });
+    }
 
     return NextResponse.json(data);
   } catch (error) {
@@ -157,10 +113,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ folderId: string }> },
 ) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-    process.env.SUPABASE_SERVICE_KEY || "",
-  );
+  const supabase = createAdminClient();
 
   try {
     const userId = await getCurrentUser();
@@ -170,24 +123,17 @@ export async function DELETE(
 
     const { folderId } = await params;
 
-    // Verify folder ownership
-    const { data: folder, error: folderError } = await supabase
-      .from("folders")
-      .select("id")
-      .eq("id", folderId)
-      .eq("created_by", userId)
-      .single();
-
-    if (folderError || !folder) {
-      return NextResponse.json({ error: "Folder not found" }, { status: 404 });
-    }
-
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("folders")
       .delete()
-      .eq("id", folderId);
+      .eq("id", folderId)
+      .eq("created_by", userId)
+      .select("id");
 
     if (error) throw error;
+    if (!data || data.length === 0) {
+      return NextResponse.json({ error: "Folder not found" }, { status: 404 });
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

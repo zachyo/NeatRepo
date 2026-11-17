@@ -1,12 +1,12 @@
-import { createClient } from "@supabase/supabase-js";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { NextRequest, NextResponse } from "next/server";
-import { getCurrentUser } from "@/lib/auth";
+import { z } from "zod";
+import { clearUserCookie, getCurrentUser } from "@/lib/auth";
 
-export async function GET(req: NextRequest) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-    process.env.SUPABASE_SERVICE_KEY || "",
-  );
+const userUpdateSchema = z.object({ is_public: z.boolean().optional() });
+
+export async function GET() {
+  const supabase = createAdminClient();
 
   const userId = await getCurrentUser();
   if (!userId) {
@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await supabase
     .from("users")
-    .select("id, username, email, avatar_url, is_public, created_at")
+    .select("id, username, email, avatar_url, is_public, created_at, last_synced_at")
     .eq("id", userId)
     .single();
 
@@ -27,25 +27,21 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-    process.env.SUPABASE_SERVICE_KEY || "",
-  );
+  const supabase = createAdminClient();
 
   const userId = await getCurrentUser();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await req.json();
-  const { is_public } = body;
-
-  const updateData: Record<string, any> = {};
-  if (is_public !== undefined) updateData.is_public = is_public;
+  const parsed = userUpdateSchema.safeParse(await req.json());
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid input" }, { status: 400 });
+  }
 
   const { data, error } = await supabase
     .from("users")
-    .update(updateData)
+    .update(parsed.data)
     .eq("id", userId)
     .select("id, username, email, avatar_url, is_public")
     .single();
@@ -60,28 +56,34 @@ export async function PUT(req: NextRequest) {
   return NextResponse.json(data);
 }
 
-export async function DELETE(req: NextRequest) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-    process.env.SUPABASE_SERVICE_KEY || "",
-  );
+export async function DELETE() {
+  const supabase = createAdminClient();
 
   const userId = await getCurrentUser();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Delete user data in order (repos refs, folder repos, folders, then user)
-  await supabase
-    .from("folder_repos")
-    .delete()
-    .in(
-      "folder_id",
-      supabase.from("folders").select("id").eq("user_id", userId) as any,
-    );
-  await supabase.from("folders").delete().eq("user_id", userId);
-  await supabase.from("repositories").delete().eq("user_id", userId);
-  await supabase.from("users").delete().eq("id", userId);
+  // folder_repos rows cascade from folders and repositories (see migration
+  // 0001). Folders and repositories are deleted explicitly so this still works
+  // if the users → folders/repositories cascades are missing.
+  const steps = [
+    () => supabase.from("folders").delete().eq("created_by", userId),
+    () => supabase.from("repositories").delete().eq("user_id", userId),
+    () => supabase.from("users").delete().eq("id", userId),
+  ];
 
+  for (const step of steps) {
+    const { error } = await step();
+    if (error) {
+      console.error("Account deletion failed:", error);
+      return NextResponse.json(
+        { error: "Failed to delete account. Please try again." },
+        { status: 500 },
+      );
+    }
+  }
+
+  await clearUserCookie();
   return NextResponse.json({ success: true });
 }

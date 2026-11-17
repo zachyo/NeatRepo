@@ -13,6 +13,8 @@ import {
   Edit2,
   Pin,
   PinOff,
+  Globe,
+  Lock,
 } from "lucide-react";
 import CreateFolderDialog from "@/components/dashboard/create-folder-dialog";
 import EditFolderDialog from "@/components/dashboard/edit-folder-dialog";
@@ -37,6 +39,7 @@ interface Folder {
   icon?: string;
   repo_count?: number;
   is_pinned?: boolean;
+  is_public?: boolean;
   created_at?: string;
   updated_at?: string;
 }
@@ -65,12 +68,12 @@ export default function FoldersPage() {
     setFilteredFolders(filtered);
   }, [search, folders]);
 
-  const handleCreateFolder = async (name: string) => {
+  const handleCreateFolder = async (name: string, isPublic = false) => {
     try {
       const response = await fetch("/api/folders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, is_public: isPublic }),
       });
 
       if (response.ok) {
@@ -86,12 +89,16 @@ export default function FoldersPage() {
     }
   };
 
-  const handleEditFolder = async (id: string, name: string) => {
+  const handleEditFolder = async (
+    id: string,
+    name: string,
+    isPublic: boolean,
+  ) => {
     try {
       const response = await fetch(`/api/folders/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, is_public: isPublic }),
       });
 
       if (response.ok) {
@@ -227,8 +234,19 @@ export default function FoldersPage() {
                       </div>
                     )}
                   </div>
-                  <h3 className="text-sm md:text-lg text-center -mt-3 md:-mt-6 font-semibold text-gray-900 group-hover:text-blue-600 transition truncate">
-                    {folder.name}
+                  <h3 className="flex items-center justify-center gap-1.5 text-sm md:text-lg text-center -mt-3 md:-mt-6 font-semibold text-gray-900 group-hover:text-blue-600 transition">
+                    {folder.is_public ? (
+                      <Globe
+                        className="w-3.5 h-3.5 flex-shrink-0 text-gray-400"
+                        aria-label="Public folder"
+                      />
+                    ) : (
+                      <Lock
+                        className="w-3.5 h-3.5 flex-shrink-0 text-gray-400"
+                        aria-label="Private folder"
+                      />
+                    )}
+                    <span className="truncate">{folder.name}</span>
                   </h3>
                 </Card>
               </Link>
@@ -281,6 +299,7 @@ export default function FoldersPage() {
           onOpenChange={(open) => !open && setFolderToEdit(null)}
           folderId={folderToEdit.id}
           initialName={folderToEdit.name}
+          initialIsPublic={folderToEdit.is_public ?? false}
           onEditFolder={handleEditFolder}
         />
       )}
