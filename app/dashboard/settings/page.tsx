@@ -64,19 +64,24 @@ export default function SettingsPage() {
   const handleManualSync = async () => {
     setSyncing(true);
     try {
-      const res = await fetch("/api/sync/background", { method: "POST" });
-      if (res.ok) {
-        const result = await res.json();
-        if (result.synced > 0) {
-          toast.success(`Synced ${result.synced} new repositories from GitHub`);
-        } else if (!result.hasMore) {
-          toast.success("All repositories are already up to date");
-        } else {
-          toast.info("Sync complete — check back later for more repos");
+      // A full re-sync may span several requests; continue while hasMore.
+      let total = 0;
+      let hasMore = true;
+      for (let i = 0; i < 10 && hasMore; i++) {
+        const res = await fetch("/api/sync/background", { method: "POST" });
+        if (!res.ok) {
+          const err = await res.json();
+          toast.error(err.error || "Sync failed");
+          return;
         }
+        const result = await res.json();
+        total += result.synced || 0;
+        hasMore = !!result.hasMore;
+      }
+      if (hasMore) {
+        toast.info(`Synced ${total} repositories. Run sync again to finish.`);
       } else {
-        const err = await res.json();
-        toast.error(err.error || "Sync failed");
+        toast.success(`Synced ${total} repositories from GitHub`);
       }
     } catch {
       toast.error("Failed to connect to GitHub");

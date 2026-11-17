@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 
@@ -6,10 +6,7 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ repoId: string }> },
 ) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-    process.env.SUPABASE_SERVICE_KEY || "",
-  );
+  const supabase = createAdminClient();
 
   try {
     const userId = await getCurrentUser();
@@ -18,35 +15,31 @@ export async function PUT(
     }
 
     const { repoId } = await params;
-    const body = await req.json();
-    const { is_favorite } = body;
+    const { is_favorite } = await req.json();
 
-    // Verify repo ownership
-    const { data: repo, error: repoError } = await supabase
+    if (typeof is_favorite !== "boolean") {
+      return NextResponse.json(
+        { error: "is_favorite must be a boolean" },
+        { status: 400 },
+      );
+    }
+
+    // updated_at mirrors GitHub's value, so it is not touched here.
+    const { data, error } = await supabase
       .from("repositories")
-      .select("id")
+      .update({ is_favorite })
       .eq("id", repoId)
       .eq("user_id", userId)
-      .single();
+      .select()
+      .maybeSingle();
 
-    if (repoError || !repo) {
+    if (error) throw error;
+    if (!data) {
       return NextResponse.json(
         { error: "Repository not found" },
         { status: 404 },
       );
     }
-
-    const { data, error } = await supabase
-      .from("repositories")
-      .update({
-        ...(is_favorite !== undefined && { is_favorite }),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", repoId)
-      .select()
-      .single();
-
-    if (error) throw error;
 
     return NextResponse.json(data);
   } catch (error) {

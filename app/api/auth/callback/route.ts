@@ -1,18 +1,39 @@
 import { cookies } from "next/headers";
-import { createClient } from "@supabase/supabase-js";
+import { timingSafeEqual } from "crypto";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { NextRequest, NextResponse } from "next/server";
+import { setUserCookie } from "@/lib/auth";
+import { encryptToken } from "@/lib/crypto";
+import {
+  GITHUB_API_URL,
+  REPO_UPSERT_CONFLICT,
+  githubHeaders,
+  mapGithubRepo,
+} from "@/lib/github";
+
+function statesMatch(a: string | undefined, b: unknown): boolean {
+  if (!a || typeof b !== "string") return false;
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  return ab.length === bb.length && timingSafeEqual(ab, bb);
+}
 
 export async function POST(req: NextRequest) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-    process.env.SUPABASE_SERVICE_ROLE_KEY || "",
-  );
+  const supabase = createAdminClient();
 
   try {
-    const { code } = await req.json();
+    const { code, state } = await req.json();
 
     if (!code) {
       return NextResponse.json({ error: "no_code" }, { status: 400 });
+    }
+
+    // CSRF protection: state must match the cookie set by /api/auth/github
+    const cookieStore = await cookies();
+    const expectedState = cookieStore.get("oauth_state")?.value;
+    cookieStore.delete("oauth_state");
+    if (!statesMatch(expectedState, state)) {
+      return NextResponse.json({ error: "invalid_state" }, { status: 400 });
     }
 
     // Exchange code for access token
@@ -39,52 +60,53 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "invalid_token" }, { status: 400 });
     }
 
-    // Get user info from GitHub
-    const userResponse = await fetch("https://api.github.com/user", {
-      headers: {
-        Authorization: `Bearer ${data.access_token}`,
-        Accept: "application/json",
-      },
-    });
+    const accessToken: string = data.access_token;
 
+    // Get user info from GitHub
+    const userResponse = await fetch(`${GITHUB_API_URL}/user`, {
+      headers: githubHeaders(accessToken),
+    });
+    if (!userResponse.ok) {
+      return NextResponse.json({ error: "github_user_failed" }, { status: 502 });
+    }
     const githubUser = await userResponse.json();
 
     // Get user email if not in main response
     let email = githubUser.email;
     if (!email) {
-      const emailResponse = await fetch("https://api.github.com/user/emails", {
-        headers: {
-          Authorization: `Bearer ${data.access_token}`,
-          Accept: "application/json",
-        },
+      const emailResponse = await fetch(`${GITHUB_API_URL}/user/emails`, {
+        headers: githubHeaders(accessToken),
       });
-      const emails = await emailResponse.json();
-      email = emails.find((e: any) => e.primary)?.email || emails[0]?.email;
+      const emails = emailResponse.ok ? await emailResponse.json() : [];
+      if (Array.isArray(emails)) {
+        email = emails.find((e: any) => e.primary)?.email || emails[0]?.email;
+      }
     }
+
+    const encryptedToken = encryptToken(accessToken);
 
     // Create or update user in Supabase
     const { data: existingUser } = await supabase
       .from("users")
-      .select("*")
+      .select("id")
       .eq("github_id", githubUser.id)
-      .single();
+      .maybeSingle();
 
     let userId: string;
 
     if (existingUser) {
       userId = existingUser.id;
-      // Update user info
-      await supabase
+      const { error: updateError } = await supabase
         .from("users")
         .update({
           username: githubUser.login,
           avatar_url: githubUser.avatar_url,
-          github_access_token: data.access_token,
-          updated_at: new Date(),
+          github_access_token: encryptedToken,
+          updated_at: new Date().toISOString(),
         })
         .eq("id", userId);
+      if (updateError) throw updateError;
     } else {
-      // Create new user
       const { data: newUser, error } = await supabase
         .from("users")
         .insert({
@@ -92,9 +114,9 @@ export async function POST(req: NextRequest) {
           username: githubUser.login,
           github_id: githubUser.id,
           avatar_url: githubUser.avatar_url,
-          github_access_token: data.access_token,
+          github_access_token: encryptedToken,
         })
-        .select()
+        .select("id")
         .single();
 
       if (error || !newUser) {
@@ -107,46 +129,25 @@ export async function POST(req: NextRequest) {
       userId = newUser.id;
     }
 
-    // Set session cookie
-    const cookieStore = await cookies();
-    cookieStore.set("user_id", userId, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 60 * 60 * 24 * 7, // 7 days
-    });
+    await setUserCookie(userId);
 
-    // Fetch repos
+    // Sync the first page of repos for a fast first load; the background
+    // sync (/api/sync/background) performs the full re-sync afterwards.
     const reposResponse = await fetch(
-      "https://api.github.com/user/repos?per_page=100&sort=updated",
-      {
-        headers: {
-          Authorization: `Bearer ${data.access_token}`,
-          Accept: "application/json",
-        },
-      },
+      `${GITHUB_API_URL}/user/repos?per_page=100&sort=updated`,
+      { headers: githubHeaders(accessToken) },
     );
-    const repos = await reposResponse.json();
+    const repos = reposResponse.ok ? await reposResponse.json() : [];
 
-    // Upsert into supabase
     if (Array.isArray(repos) && repos.length > 0) {
-      await supabase.from("repositories").upsert(
-        repos.map((repo: any) => ({
-          github_repo_id: repo.id,
-          user_id: userId,
-          name: repo.name,
-          full_name: repo.full_name,
-          description: repo.description,
-          url: repo.html_url,
-          private: repo.private,
-          language: repo.language,
-          stars: repo.stargazers_count,
-          forks: repo.forks_count,
-          updated_at: repo.updated_at,
-          synced_at: new Date(),
-        })),
-        { onConflict: "github_repo_id" },
-      );
+      const syncedAt = new Date().toISOString();
+      const { error: upsertError } = await supabase
+        .from("repositories")
+        .upsert(
+          repos.map((repo: any) => mapGithubRepo(repo, userId, syncedAt)),
+          { onConflict: REPO_UPSERT_CONFLICT },
+        );
+      if (upsertError) console.error("Initial repo sync failed:", upsertError);
     }
 
     return NextResponse.json({ success: true });

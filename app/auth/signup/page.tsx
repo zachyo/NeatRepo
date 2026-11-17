@@ -6,11 +6,7 @@ import { Github } from 'lucide-react';
 
 export default function SignupPage() {
   const handleGitHubLogin = () => {
-    const clientId = process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID;
-    const redirectUri = `${window.location.origin}/auth/github/callback`;
-    const scope = 'user:email';
-    
-    window.location.href = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&scope=${scope}`;
+    window.location.href = '/api/auth/github';
   };
 
   return (

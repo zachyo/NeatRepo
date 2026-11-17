@@ -58,3 +58,10 @@ export const useUser = (options?: options) =>
     url: "/api/user",
     options,
   });
+
+export const useRepoLanguages = (options?: options) =>
+  useQueryCall({
+    queryKey: ["repoLanguages"],
+    url: "/api/repos/languages",
+    options,
+  });
