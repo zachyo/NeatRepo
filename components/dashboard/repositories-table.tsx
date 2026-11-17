@@ -7,6 +7,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -17,6 +18,7 @@ import {
   EyeOff,
   Loader2,
   Folder,
+  Lock,
 } from "lucide-react";
 import AddRepoToFolderDialog from "./add-repo-to-folder-dialog";
 import { cn } from "@/lib/utils";
@@ -99,10 +101,10 @@ export default function RepositoriesTable({
 
   if (loading && repos.length === 0) {
     return (
-      <Card className="bg-white border-gray-200 overflow-hidden">
+      <Card className="overflow-hidden rounded-xl border-gray-200 bg-white shadow-none">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
+            <thead className="border-b border-gray-200 bg-gray-50/80">
               <tr>
                 <th className="px-6 py-3 text-left w-12">
                   <Skeleton className="w-4 h-4 rounded" />
@@ -162,16 +164,18 @@ export default function RepositoriesTable({
 
   if (repos.length === 0) {
     return (
-      <Card className="bg-white border-gray-200 p-8">
+      <Card className="rounded-xl border-dashed border-gray-300 bg-white px-6 py-12 shadow-none">
         <div className="flex flex-col items-center justify-center text-center">
-          <GitBranch className="w-12 h-12 text-gray-300 mb-4" />
-          <p className="text-gray-500 font-medium">
-            No repositories found {search ? `for "${search}"` : ""}
+          <div className="mb-4 flex size-12 items-center justify-center rounded-xl bg-gray-100">
+            <GitBranch className="size-6 text-gray-400" />
+          </div>
+          <p className="font-medium text-gray-900">
+            {search ? `No repositories match "${search}"` : "No repositories here yet"}
           </p>
-          <p className="text-sm text-gray-400 mt-1">
+          <p className="mt-1 max-w-sm text-pretty text-sm text-gray-500">
             {search
-              ? `Try searching for a different repository`
-              : "Start by adding a repository"}
+              ? "Try a different search term or clear your filters."
+              : "Repositories sync from GitHub automatically. You can also run a sync from Settings."}
           </p>
         </div>
       </Card>
@@ -181,8 +185,8 @@ export default function RepositoriesTable({
   return (
     <>
       {selectedRepos.size > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 flex items-center justify-between">
-          <span className="text-sm text-blue-800 font-medium">
+        <div className="mb-3 flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5">
+          <span className="text-sm font-medium tabular-nums text-blue-800">
             {selectedRepos.size}{" "}
             {selectedRepos.size === 1 ? "repository" : "repositories"} selected
           </span>
@@ -196,15 +200,27 @@ export default function RepositoriesTable({
             }}
           >
             <Folder className="w-4 h-4 mr-2" />
-            Add to Folder
+            Add to folder
           </Button>
         </div>
       )}
 
-      <Card className="bg-white border-gray-200 overflow-hidden">
+      <Card className="relative overflow-hidden rounded-xl border-gray-200 bg-white shadow-none">
+        {refetching && (
+          <div
+            role="status"
+            aria-label="Updating"
+            className="absolute inset-x-0 top-0 z-10 flex justify-center pt-16"
+          >
+            <span className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1 text-xs text-gray-600 shadow-sm">
+              <Loader2 className="size-3.5 animate-spin" />
+              Updating
+            </span>
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
+            <thead className="border-b border-gray-200 bg-gray-50/80">
               <tr>
                 <th className="px-6 py-3 text-left w-12">
                   <Checkbox
@@ -215,37 +231,38 @@ export default function RepositoriesTable({
                     aria-label="Select all"
                   />
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500">
                   Repository
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500">
                   Owner
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500">
                   Stars
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500">
                   Language
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500">
                   Actions
                 </th>
               </tr>
             </thead>
             <tbody
               className={cn(
-                "divide-y divide-gray-200 relative",
-                refetching && "opacity-40",
+                "divide-y divide-gray-100 transition-opacity",
+                refetching && "opacity-50",
               )}
             >
-              {refetching && (
-                <div className="inset-0 absolute flex items-center justify-center bg-black/20">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                </div>
-              )}
 
               {repos.map((repo) => (
-                <tr key={repo.id} className="hover:bg-gray-50 transition">
+                <tr
+                  key={repo.id}
+                  className={cn(
+                    "transition-colors hover:bg-gray-50",
+                    selectedRepos.has(repo.id) && "bg-blue-50/50 hover:bg-blue-50/70",
+                  )}
+                >
                   <td className="px-6 py-4">
                     <Checkbox
                       checked={selectedRepos.has(repo.id)}
@@ -257,23 +274,34 @@ export default function RepositoriesTable({
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
-                        <GitBranch className="w-4 h-4 text-blue-600" />
+                      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gray-100">
+                        <GitBranch className="size-4 text-gray-600" />
                       </div>
-                      <div>
-                        <a
-                          href={repo.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="font-medium text-blue-600 hover:text-blue-700 truncate"
-                        >
-                          {repo.name}
-                        </a>
-                        {repo.is_favorite && (
-                          <Star className="inline-block w-4 h-4 ml-2 mb-0.5 text-yellow-500 fill-current" />
-                        )}
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <a
+                            href={repo.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="truncate font-medium text-gray-900 hover:text-blue-600 hover:underline"
+                          >
+                            {repo.name}
+                          </a>
+                          {repo.private && (
+                            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-gray-200 px-1.5 py-px text-[11px] text-gray-500">
+                              <Lock className="size-2.5" />
+                              Private
+                            </span>
+                          )}
+                          {repo.is_favorite && (
+                            <Star
+                              aria-label="Favorite"
+                              className="size-3.5 shrink-0 fill-amber-400 text-amber-500"
+                            />
+                          )}
+                        </div>
                         {repo.description && (
-                          <p className="text-sm text-gray-500 truncate max-w-xs">
+                          <p className="max-w-xs truncate text-sm text-gray-500">
                             {repo.description}
                           </p>
                         )}
@@ -284,14 +312,14 @@ export default function RepositoriesTable({
                     {repo.full_name?.split("/")[0]}
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex items-center gap-1 text-sm text-gray-600">
-                      <Star className="w-4 h-4 text-yellow-500" />
-                      {repo.stars || 0}
+                    <div className="flex items-center gap-1 text-sm tabular-nums text-gray-600">
+                      <Star className="size-3.5 text-gray-400" />
+                      {(repo.stars || 0).toLocaleString()}
                     </div>
                   </td>
                   <td className="px-6 py-4">
                     {repo.language ? (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                      <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700">
                         {repo.language}
                       </span>
                     ) : (
@@ -304,7 +332,8 @@ export default function RepositoriesTable({
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-8 w-8 p-0"
+                          className="size-8 p-0 text-gray-500"
+                          aria-label={`Actions for ${repo.name}`}
                         >
                           <MoreVertical className="w-4 h-4" />
                         </Button>
@@ -318,7 +347,7 @@ export default function RepositoriesTable({
                           className="cursor-pointer hover:!bg-gray-100 hover:!text-gray-900 mb-1"
                         >
                           <GitBranch className="w-4 h-4 mr-2" />
-                          Add to Folder
+                          Add to folder
                         </DropdownMenuItem>
                         {onToggleFavorite && (
                           <DropdownMenuItem
@@ -326,20 +355,20 @@ export default function RepositoriesTable({
                             className="cursor-pointer hover:!bg-gray-100 hover:!text-gray-900"
                           >
                             <Star
-                              className={`w-4 h-4 mr-2 ${repo.is_favorite ? "fill-yellow-500 text-yellow-500" : ""}`}
+                              className={cn("mr-2 size-4", repo.is_favorite && "fill-amber-400 text-amber-500")}
                             />
                             {repo.is_favorite
-                              ? "Unmark Favorite"
-                              : "Mark as Favorite"}
+                              ? "Remove from favorites"
+                              : "Add to favorites"}
                           </DropdownMenuItem>
                         )}
-                        <hr />
+                        <DropdownMenuSeparator />
                         <DropdownMenuItem
                           onClick={() => window.open(repo.url, "_blank")}
                           className="cursor-pointer hover:!bg-gray-100 hover:!text-gray-900 mt-1"
                         >
                           <Eye className="w-4 h-4 mr-2" />
-                          View on GitHub
+                          Open on GitHub
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -352,9 +381,9 @@ export default function RepositoriesTable({
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="bg-gray-50 border-t border-gray-200 px-6 py-4 flex items-center justify-between">
-            <p className="text-sm text-gray-600">
-              Page {page} of {totalPages} ({totalItems} total)
+          <div className="flex items-center justify-between border-t border-gray-200 px-6 py-3">
+            <p className="text-sm tabular-nums text-gray-500">
+              Page {page} of {totalPages} · {totalItems.toLocaleString()} repositories
             </p>
             <div className="flex gap-2">
               <Button

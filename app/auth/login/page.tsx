@@ -25,7 +25,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#FDFDFD] flex items-center justify-center p-4 selection:bg-blue-100">
+    <div className="min-h-dvh bg-[#FDFDFD] flex items-center justify-center p-4 selection:bg-blue-100">
       <div
         className={`w-full max-w-[1000px] grid grid-cols-1 md:grid-cols-2 bg-white rounded-3xl overflow-hidden border border-gray-100 shadow-[0_8px_40px_rgba(0,0,0,0.04)] transition-all duration-1000 ease-out transform ${
           mounted ? "translate-y-0 opacity-100" : "translate-y-8 opacity-0"

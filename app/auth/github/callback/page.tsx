@@ -8,7 +8,7 @@ export default function GitHubCallbackPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="min-h-dvh bg-gray-50 flex items-center justify-center p-4">
           Loading...
         </div>
       }
@@ -68,7 +68,7 @@ function GitHubCallbackContent() {
   }, [router, searchParams]);
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
+    <div className="min-h-dvh bg-gray-50 flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-gray-100 p-8 flex flex-col items-center text-center">
         <div className="w-20 h-20 bg-blue-50 rounded-2xl flex items-center justify-center mb-6 relative">
           <Github className="w-8 h-8 text-blue-600" />

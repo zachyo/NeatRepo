@@ -7,6 +7,7 @@ import { Plus, Folder, GitBranch, Github } from "lucide-react";
 import DashboardStats from "@/components/dashboard/dashboard-stats";
 import RecentFolders from "@/components/dashboard/recent-folders";
 import RepositoriesTable from "@/components/dashboard/repositories-table";
+import RepoFilters from "@/components/dashboard/repo-filters";
 import CreateFolderDialog from "@/components/dashboard/create-folder-dialog";
 import { useFolders, useRepositories, useUser } from "@/hooks/queries";
 import { useDebouncedCallback } from "use-debounce-pro";
@@ -161,31 +162,15 @@ export default function DashboardPage() {
   const recentFolders = foldersData?.slice(0, 4);
 
   return (
-    <div className="max-w-7xl mx-auto space-y-8 -mt-2">
-      {/* Header */}
-      <div className="flex. flex-col md:flex-row justify-between items-start md:items-center gap-4 hidden">
-        <div>
-          <h1 className="text-3xl md:text-4xl font-bold text-gray-900">
-            GitHub Repository Manager
-          </h1>
-          <p className="text-gray-600 mt-2">
-            Organize and manage your GitHub repositories in folders
-          </p>
-        </div>
-        <Button
-          onClick={() => setShowCreateFolder(true)}
-          className="bg-blue-600 text-white hover:bg-blue-700"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          New Folder
-        </Button>
+    <div className="mx-auto max-w-7xl space-y-8">
+      <div>
+        <h2 className="text-2xl font-semibold text-gray-900">
+          {userData?.username ? `Welcome back, ${userData.username}` : "Welcome back"}
+        </h2>
+        <p className="mt-1 text-pretty text-sm text-gray-500">
+          Here&apos;s what&apos;s in your workspace.
+        </p>
       </div>
-      {userData?.username && (
-        <div className="text-3xl font-bold text-gray-900 mb-6">
-          Welcome, {userData.username?.slice(0, 1).toUpperCase()}
-          {userData.username?.slice(1)}!
-        </div>
-      )}
 
       {/* Top Stats Cards */}
       <DashboardStats
@@ -200,101 +185,26 @@ export default function DashboardPage() {
       )}
 
       {/* All Repositories */}
-      <div className="space-y-4">
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <h2 className="text-2xl font-bold text-gray-900">Repositories</h2>
-            <Input
-              placeholder="Search repositories..."
-              value={reposSearch}
-              onChange={(e) => {
-                setReposSearch(e.target.value);
-                setReposPage(1);
-              }}
-              className="w-full sm:w-64"
-            />
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <Select
-              value={filterFolder}
-              onValueChange={(v) => {
-                setFilterFolder(v);
-                setReposPage(1);
-              }}
-            >
-              <SelectTrigger className="w-[160px] bg-white">
-                <SelectValue placeholder="All Folders" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Folders</SelectItem>
-                {foldersData?.map((folder: any) => (
-                  <SelectItem key={folder.id} value={folder.id}>
-                    {folder.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select
-              value={filterLanguage}
-              onValueChange={(v) => {
-                setFilterLanguage(v);
-                setReposPage(1);
-              }}
-            >
-              <SelectTrigger className="w-[140px] bg-white">
-                <SelectValue placeholder="Language" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Languages</SelectItem>
-                <SelectItem value="TypeScript">TypeScript</SelectItem>
-                <SelectItem value="JavaScript">JavaScript</SelectItem>
-                <SelectItem value="Python">Python</SelectItem>
-                <SelectItem value="Rust">Rust</SelectItem>
-                <SelectItem value="Go">Go</SelectItem>
-                <SelectItem value="HTML">HTML</SelectItem>
-                <SelectItem value="CSS">CSS</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select
-              value={filterDate}
-              onValueChange={(v) => {
-                setFilterDate(v);
-                setReposPage(1);
-              }}
-            >
-              <SelectTrigger className="w-[140px] bg-white">
-                <SelectValue placeholder="Updated Date" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Any time</SelectItem>
-                <SelectItem value="7d">Last 7 days</SelectItem>
-                <SelectItem value="30d">Last 30 days</SelectItem>
-                <SelectItem value="1y">Last Year</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select
-              value={filterStars}
-              onValueChange={(v) => {
-                setFilterStars(v);
-                setReposPage(1);
-              }}
-            >
-              <SelectTrigger className="w-[140px] bg-white">
-                <SelectValue placeholder="Stars" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Any Stars</SelectItem>
-                <SelectItem value="10">&gt; 10 Stars</SelectItem>
-                <SelectItem value="50">&gt; 50 Stars</SelectItem>
-                <SelectItem value="100">&gt; 100 Stars</SelectItem>
-                <SelectItem value="1000">&gt; 1000 Stars</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
+      <section className="space-y-3">
+        <h2 className="text-base font-semibold text-gray-900">All repositories</h2>
+        <RepoFilters
+          values={{
+            search: reposSearch,
+            folder: filterFolder,
+            language: filterLanguage,
+            date: filterDate,
+            stars: filterStars,
+          }}
+          onChange={(next) => {
+            if (next.search !== undefined) setReposSearch(next.search);
+            if (next.folder !== undefined) setFilterFolder(next.folder);
+            if (next.language !== undefined) setFilterLanguage(next.language);
+            if (next.date !== undefined) setFilterDate(next.date);
+            if (next.stars !== undefined) setFilterStars(next.stars);
+            setReposPage(1);
+          }}
+          folders={foldersData ?? []}
+        />
 
         <RepositoriesTable
           repos={reposData?.repos ?? []}
@@ -309,7 +219,7 @@ export default function DashboardPage() {
           onReposUpdate={refetchRepos}
           onToggleFavorite={handleToggleFavorite}
         />
-      </div>
+      </section>
 
       {/* Create Folder Dialog */}
       <CreateFolderDialog

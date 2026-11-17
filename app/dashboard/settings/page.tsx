@@ -136,7 +136,7 @@ export default function SettingsPage() {
 
   if (loading) {
     return (
-      <div className="max-w-7xl mt-5 mx-auto space-y-8">
+      <div className="mx-auto max-w-7xl space-y-8">
         <div className="space-y-2">
           <Skeleton className="w-48 h-9" />
           <Skeleton className="w-72 h-5" />

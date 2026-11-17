@@ -200,7 +200,7 @@ export default function AddRepoDialog({
                           <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
                             {repo.stars > 0 && (
                               <span className="flex items-center gap-1">
-                                <Star className="w-3 h-3 text-yellow-500" />
+                                <Star className="w-3 h-3 text-amber-500" />
                                 {repo.stars.toLocaleString()}
                               </span>
                             )}

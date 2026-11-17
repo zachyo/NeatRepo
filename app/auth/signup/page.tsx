@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Github } from 'lucide-react';
+import { Logo } from '@/components/brand/logo';
 
 export default function SignupPage() {
   const handleGitHubLogin = () => {
@@ -12,12 +13,7 @@ export default function SignupPage() {
   return (
     <div className="bg-white border border-gray-200 rounded-2xl p-8 shadow-sm">
       <div className="mb-8">
-        <div className="flex items-center gap-2 mb-6">
-          <div className="w-8 h-8 rounded-lg bg-blue-500 flex items-center justify-center">
-            <span className="text-white font-bold text-lg">R</span>
-          </div>
-          <span className="text-lg font-bold text-gray-900">RepoFolders</span>
-        </div>
+        <Logo className="mb-6" />
         <h1 className="text-2xl font-bold text-gray-900">Create your account</h1>
         <p className="text-gray-600 mt-2">Join teams organizing files better</p>
       </div>

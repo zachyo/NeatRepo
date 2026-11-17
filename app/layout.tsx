@@ -1,31 +1,35 @@
-"use client";
-
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState } from "react";
 
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
+import { Providers } from "./providers";
 
-const _geist = Geist({ subsets: ["latin"] });
-const _geistMono = Geist_Mono({ subsets: ["latin"] });
+const geistSans = Geist({ subsets: ["latin"], variable: "--font-geist-sans" });
+const geistMono = Geist_Mono({
+  subsets: ["latin"],
+  variable: "--font-geist-mono",
+});
 
-const metadata: Metadata = {
-  title: "RepoFolders - Organize Files, Collaborate Seamlessly",
+export const metadata: Metadata = {
+  title: {
+    default: "NeatRepo – Folders for your GitHub repositories",
+    template: "%s · NeatRepo",
+  },
   description:
-    "RepoFolders makes team file management effortless. Create workspaces, organize with folders, share securely, and collaborate in real-time.",
-  generator: "v0.app",
-  keywords:
-    "file management, collaboration, workspace, secure sharing, team productivity",
-  authors: [{ name: "RepoFolders" }],
+    "NeatRepo syncs your GitHub repositories and lets you organize them into folders, pin favorites, and share a clean public profile.",
+  keywords: ["GitHub", "repositories", "organize", "folders", "developer tools"],
   openGraph: {
     type: "website",
-    url: "https://repofolders.com",
-    title: "RepoFolders - Organize Files, Collaborate Seamlessly",
-    description: "Team file management made simple",
-    images: [{ url: "https://repofolders.com/og-image.png" }],
+    title: "NeatRepo – Folders for your GitHub repositories",
+    description:
+      "Organize your GitHub repositories into folders and share the ones you choose.",
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#ffffff",
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
@@ -33,23 +37,10 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const [queryClient] = useState(
-    () =>
-      new QueryClient({
-        defaultOptions: {
-          queries: {
-            staleTime: 1000 * 60 * 5, // 5 min cache
-            refetchOnWindowFocus: false,
-          },
-        },
-      }),
-  );
   return (
-    <html lang="en">
+    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
       <body className="font-sans antialiased">
-        <QueryClientProvider client={queryClient}>
-          {children}
-        </QueryClientProvider>
+        <Providers>{children}</Providers>
         <Toaster richColors />
       </body>
     </html>

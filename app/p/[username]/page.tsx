@@ -198,7 +198,7 @@ export default function PublicProfilePage({ params }: PageProps) {
         {favoriteRepos.length > 0 && (
           <section>
             <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-              <Star className="w-5 h-5 text-yellow-500" />
+              <Star className="w-5 h-5 text-amber-500" />
               Favorite Repositories
             </h2>
             <Card className="bg-white border-gray-200 shadow-sm overflow-hidden">
@@ -255,7 +255,7 @@ export default function PublicProfilePage({ params }: PageProps) {
                         </TableCell>
                         <TableCell className="text-center">
                           <div className="flex items-center justify-center gap-1.5 text-gray-600">
-                            <Star className="w-3.5 h-3.5 fill-current text-gray-400 group-hover:text-yellow-500 transition-colors" />
+                            <Star className="w-3.5 h-3.5 fill-current text-gray-400 group-hover:text-amber-500 transition-colors" />
                             <span className="text-sm font-medium">
                               {repo.stars || 0}
                             </span>
