@@ -12,6 +12,15 @@ export const useRepositories = (userId: string) =>
     staleTime: 1000 * 60 * 5, // won't refetch for 5 mins
   });
 
+export class HttpError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 type QueryDetails = {
   queryKey: string | string[];
   url: string;
@@ -25,8 +34,15 @@ export const useQueryCall = ({ queryKey, url, options }: QueryDetails) =>
       const res = await fetch(
         url + "?" + new URLSearchParams(options?.queryParams).toString(),
       );
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new HttpError(res.status, body?.error ?? "Request failed");
+      }
       return res.json();
     },
+    // A 4xx will not succeed on retry (not found, signed out, invalid input).
+    retry: (failureCount, error) =>
+      !(error instanceof HttpError && error.status < 500) && failureCount < 2,
     enabled: options?.enabled ?? true,
     staleTime: 1000 * 60 * 5, // won't refetch for 5 mins
   });

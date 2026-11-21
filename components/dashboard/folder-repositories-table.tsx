@@ -1,12 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { GitBranch, Star, ExternalLink, X, Trash2, Lock } from "lucide-react";
 import Link from "next/link";
-import { cn } from "@/lib/utils";
+import { arrayMove } from "@dnd-kit/sortable";
+import { useQueryClient } from "@tanstack/react-query";
+import { ExternalLink, Folder, GitBranch, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -17,88 +15,135 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { ContextMenuItem } from "@/components/ui/context-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { apiSend, errorMessage } from "@/lib/api-client";
+import { sortFolderRepos, type FolderRepoSort } from "@/lib/repo-query";
+import { useFolders, useInvalidateRepoData } from "@/hooks/queries";
+import { useViewMode } from "@/hooks/use-view-mode";
+import AddRepoToFolderDialog from "./add-repo-to-folder-dialog";
+import { useRegisterReorder } from "./dnd-provider";
+import RepoCollection, { ViewToggle, type Repo } from "./repo-collection";
+
+interface FolderRepoRow {
+  repo_id: string;
+  added_at: string;
+  position: number;
+  repositories: Repo;
+}
 
 interface FolderRepositoriesTableProps {
-  repos: any[];
+  repos: FolderRepoRow[];
   folderId: string;
-  onUpdate: () => void;
+  sort: FolderRepoSort;
 }
+
+const SORT_LABELS: Record<FolderRepoSort, string> = {
+  manual: "Manual order",
+  updated: "Recently updated",
+  stars: "Most stars",
+  name: "Name",
+  added: "Date added",
+};
 
 export default function FolderRepositoriesTable({
   repos,
   folderId,
-  onUpdate,
+  sort,
 }: FolderRepositoriesTableProps) {
-  const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set());
-  const [isDeleting, setIsDeleting] = useState(false);
+  const queryClient = useQueryClient();
+  const invalidate = useInvalidateRepoData();
+  const { data: foldersData } = useFolders({ queryParams: { search: "" } });
+  const [view, setView] = useViewMode();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [pendingRemoval, setPendingRemoval] = useState<string[]>([]);
+  const [removing, setRemoving] = useState(false);
+  const [dialogRepoIds, setDialogRepoIds] = useState<string[]>([]);
+  const [dialogLabel, setDialogLabel] = useState("");
 
-  const handleSelectAll = (checked: boolean) => {
-    if (checked) {
-      const newSelected = new Set(repos.map((r) => r.repositories.id));
-      setSelectedRepos(newSelected);
-    } else {
-      setSelectedRepos(new Set());
+  const containerId = `folder-repos:${folderId}`;
+  const queryKey = ["folder", folderId];
+  const items = repos.map((row) => row.repositories);
+
+  /** Applies a change to the cached folder and returns the previous value. */
+  const patchFolder = (patch: (folder: any) => any) => {
+    const previous = queryClient.getQueryData(queryKey);
+    queryClient.setQueryData(queryKey, (folder: any) => folder && patch(folder));
+    return previous;
+  };
+
+  const handleSortChange = async (next: FolderRepoSort) => {
+    const previous = patchFolder((folder) => ({
+      ...folder,
+      repo_sort: next,
+      folder_repos: sortFolderRepos(folder.folder_repos, next),
+    }));
+    try {
+      await apiSend(`/api/folders/${folderId}`, "PUT", { repo_sort: next });
+    } catch (error) {
+      queryClient.setQueryData(queryKey, previous);
+      toast.error(errorMessage(error));
     }
   };
 
-  const handleSelectRepo = (repoId: string, checked: boolean) => {
-    const newSelected = new Set(selectedRepos);
-    if (checked) {
-      newSelected.add(repoId);
-    } else {
-      newSelected.delete(repoId);
+  useRegisterReorder(containerId, async (activeId, overId) => {
+    const from = repos.findIndex((row) => row.repo_id === activeId);
+    const to = repos.findIndex((row) => row.repo_id === overId);
+    if (from < 0 || to < 0) return;
+
+    const reordered = arrayMove(repos, from, to).map((row, index) => ({
+      ...row,
+      position: index + 1,
+    }));
+    const previous = patchFolder((folder) => ({ ...folder, folder_repos: reordered }));
+
+    try {
+      await apiSend(`/api/folders/${folderId}/repos/order`, "PUT", {
+        repoIds: reordered.map((row) => row.repo_id),
+      });
+    } catch (error) {
+      queryClient.setQueryData(queryKey, previous);
+      toast.error(errorMessage(error));
     }
-    setSelectedRepos(newSelected);
+  });
+
+  const handleSelect = (repoId: string, checked: boolean) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (checked) next.add(repoId);
+      else next.delete(repoId);
+      return next;
+    });
   };
 
-  const [deleteDialogSource, setDeleteDialogSource] = useState<
-    "single" | "multiple" | null
-  >(null);
-  const [repoToDelete, setRepoToDelete] = useState<string | null>(null);
-
-  const confirmRemoveSingle = (repoId: string) => {
-    setRepoToDelete(repoId);
-    setDeleteDialogSource("single");
-  };
-
-  const confirmRemoveSelected = () => {
-    if (selectedRepos.size === 0) return;
-    setDeleteDialogSource("multiple");
-  };
-
-  const executeDelete = async () => {
-    if (deleteDialogSource === "multiple") {
-      try {
-        setIsDeleting(true);
-        for (const repoId of selectedRepos) {
-          await fetch(`/api/folders/${folderId}/repos?repoId=${repoId}`, {
-            method: "DELETE",
-          });
-        }
-        setSelectedRepos(new Set());
-        onUpdate();
-        toast.success(`Removed ${selectedRepos.size} repositories`);
-      } catch (error) {
-        console.error("Error removing repos:", error);
-        toast.error("Failed to remove repositories");
-      } finally {
-        setIsDeleting(false);
-        setDeleteDialogSource(null);
-      }
-    } else if (deleteDialogSource === "single" && repoToDelete) {
-      try {
-        await fetch(`/api/folders/${folderId}/repos?repoId=${repoToDelete}`, {
-          method: "DELETE",
-        });
-        onUpdate();
-        toast.success("Repository removed from folder");
-      } catch (error) {
-        console.error("Error removing repo:", error);
-        toast.error("Failed to remove repository");
-      } finally {
-        setRepoToDelete(null);
-        setDeleteDialogSource(null);
-      }
+  const executeRemove = async () => {
+    try {
+      setRemoving(true);
+      await apiSend(`/api/folders/${folderId}/repos`, "DELETE", { repoIds: pendingRemoval });
+      setSelected((current) => {
+        const next = new Set(current);
+        pendingRemoval.forEach((id) => next.delete(id));
+        return next;
+      });
+      await invalidate();
+      toast.success(
+        pendingRemoval.length === 1
+          ? "Repository removed from folder"
+          : `Removed ${pendingRemoval.length} repositories`,
+      );
+    } catch (error) {
+      toast.error(errorMessage(error));
+    } finally {
+      setRemoving(false);
+      setPendingRemoval([]);
     }
   };
 
@@ -111,7 +156,7 @@ export default function FolderRepositoriesTable({
           </div>
           <p className="font-medium text-gray-900">This folder is empty</p>
           <p className="mt-1 max-w-sm text-pretty text-sm text-gray-500">
-            Add repositories from the Repositories page using the row menu or by selecting several at once.
+            Add repositories from the Repositories page, or drag them onto a folder in the sidebar.
           </p>
           <Button className="mt-4 bg-blue-600 hover:bg-blue-700" asChild>
             <Link href="/dashboard/repos">Browse repositories</Link>
@@ -123,173 +168,145 @@ export default function FolderRepositoriesTable({
 
   return (
     <>
-      {selectedRepos.size > 0 && (
-        <div className="mb-3 flex items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-2.5">
-          <span className="text-sm font-medium tabular-nums text-gray-700">
-            {selectedRepos.size}{" "}
-            {selectedRepos.size === 1 ? "repository" : "repositories"} selected
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <Select value={sort} onValueChange={(next) => handleSortChange(next as FolderRepoSort)}>
+          <SelectTrigger aria-label="Sort repositories" className="h-9 w-[180px] bg-white">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {(Object.keys(SORT_LABELS) as FolderRepoSort[]).map((value) => (
+              <SelectItem key={value} value={value}>
+                {SORT_LABELS[value]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <ViewToggle view={view} onChange={setView} />
+      </div>
+
+      {selected.size > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5">
+          <span className="mr-auto text-sm font-medium tabular-nums text-gray-700">
+            {selected.size} {selected.size === 1 ? "repository" : "repositories"} selected
           </span>
           <Button
             size="sm"
-            variant="destructive"
-            onClick={confirmRemoveSelected}
-            disabled={isDeleting}
+            variant="outline"
+            onClick={() => {
+              setDialogLabel(
+                `${selected.size} ${selected.size === 1 ? "repository" : "repositories"}`,
+              );
+              setDialogRepoIds([...selected]);
+            }}
           >
-            <Trash2 className="w-4 h-4 mr-2" />
-            {isDeleting ? "Removing..." : "Remove from Folder"}
+            <Folder className="mr-2 size-4" />
+            Add to folder
+          </Button>
+          <Button
+            size="sm"
+            variant="destructive"
+            disabled={removing}
+            onClick={() => setPendingRemoval([...selected])}
+          >
+            <Trash2 className="mr-2 size-4" />
+            Remove from folder
           </Button>
         </div>
       )}
 
-      <Card className="overflow-hidden rounded-xl border-gray-200 bg-white shadow-none">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="border-b border-gray-200 bg-gray-50/80">
-              <tr>
-                <th className="px-6 py-3 text-left w-12">
-                  <Checkbox
-                    checked={
-                      repos.length > 0 && selectedRepos.size === repos.length
-                    }
-                    onCheckedChange={handleSelectAll}
-                    aria-label="Select all"
-                  />
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500">
-                  Repository
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500">
-                  Owner
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500">
-                  Stars
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500">
-                  Language
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {repos.map((repoItem) => {
-                const repo = repoItem.repositories;
-                return (
-                  <tr key={repo.id} className="hover:bg-gray-50 transition">
-                    <td className="px-6 py-4">
-                      <Checkbox
-                        checked={selectedRepos.has(repo.id)}
-                        onCheckedChange={(checked) =>
-                          handleSelectRepo(repo.id, !!checked)
-                        }
-                        aria-label={`Select ${repo.name}`}
-                      />
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gray-100">
-                          <GitBranch className="size-4 text-gray-600" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <a
-                              href={repo.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="truncate font-medium text-gray-900 hover:text-blue-600 hover:underline"
-                            >
-                              {repo.name}
-                            </a>
-                            {repo.private && (
-                              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-gray-200 px-1.5 py-px text-[11px] text-gray-500">
-                                <Lock className="size-2.5" />
-                                Private
-                              </span>
-                            )}
-                            {repo.is_favorite && (
-                              <Star
-                                aria-label="Favorite"
-                                className="size-3.5 shrink-0 fill-amber-400 text-amber-500"
-                              />
-                            )}
-                          </div>
-                          {repo.description && (
-                            <p className="text-sm text-gray-500 truncate max-w-xs">
-                              {repo.description}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
-                      {repo.full_name?.split("/")[0]}
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-1 text-sm tabular-nums text-gray-600">
-                        <Star className="size-3.5 text-gray-400" />
-                        {(repo.stars || 0).toLocaleString()}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      {repo.language ? (
-                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700">
-                          {repo.language}
-                        </span>
-                      ) : (
-                        <span className="text-sm text-gray-400">—</span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <a
-                          href={repo.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900"
-                          title="Open on GitHub"
-                          aria-label={`Open ${repo.name} on GitHub`}
-                        >
-                          <ExternalLink className="w-4 h-4" />
-                        </a>
-                        <button
-                          type="button"
-                          onClick={() => confirmRemoveSingle(repo.id)}
-                          className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600"
-                          title="Remove from folder"
-                          aria-label={`Remove ${repo.name} from folder`}
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+      <RepoCollection
+        repos={items}
+        view={view}
+        containerId={containerId}
+        selected={selected}
+        onSelect={handleSelect}
+        onSelectPage={(checked) =>
+          setSelected(checked ? new Set(items.map((repo) => repo.id)) : new Set())
+        }
+        manualOrder={sort === "manual"}
+        renderActions={(repo) => (
+          <div className="flex items-center justify-end gap-1">
+            <a
+              href={repo.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open on GitHub"
+              aria-label={`Open ${repo.name} on GitHub`}
+              className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900"
+            >
+              <ExternalLink className="size-4" />
+            </a>
+            <button
+              type="button"
+              onClick={() => setPendingRemoval([repo.id])}
+              title="Remove from folder"
+              aria-label={`Remove ${repo.name} from folder`}
+              className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+        )}
+        renderMenuItems={(repo) => (
+          <>
+            <ContextMenuItem
+              onSelect={() => {
+                setDialogLabel(repo.name);
+                setDialogRepoIds([repo.id]);
+              }}
+            >
+              <Folder className="mr-2 size-4" />
+              Add to another folder
+            </ContextMenuItem>
+            <ContextMenuItem
+              onSelect={() => window.open(repo.url, "_blank", "noopener,noreferrer")}
+            >
+              <ExternalLink className="mr-2 size-4" />
+              Open on GitHub
+            </ContextMenuItem>
+            <ContextMenuItem
+              onSelect={() => setPendingRemoval([repo.id])}
+              className="text-red-600 focus:text-red-600"
+            >
+              <X className="mr-2 size-4" />
+              Remove from folder
+            </ContextMenuItem>
+          </>
+        )}
+      />
+
+      <AddRepoToFolderDialog
+        open={dialogRepoIds.length > 0}
+        onOpenChange={(open) => !open && setDialogRepoIds([])}
+        repoIds={dialogRepoIds}
+        label={dialogLabel}
+        folders={(Array.isArray(foldersData) ? foldersData : []).filter(
+          (folder: { id: string }) => folder.id !== folderId,
+        )}
+        onSuccess={() => setSelected(new Set())}
+      />
 
       <AlertDialog
-        open={deleteDialogSource !== null}
-        onOpenChange={(open) => !open && setDeleteDialogSource(null)}
+        open={pendingRemoval.length > 0}
+        onOpenChange={(open) => !open && setPendingRemoval([])}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Remove from folder?</AlertDialogTitle>
             <AlertDialogDescription>
-              {deleteDialogSource === "multiple"
-                ? `Are you sure you want to remove the ${selectedRepos.size} selected repositories from this folder?`
-                : `Are you sure you want to remove this repository from the folder?`}
+              {pendingRemoval.length > 1
+                ? `The ${pendingRemoval.length} selected repositories will be removed from this folder.`
+                : "This repository will be removed from this folder."}{" "}
+              Nothing changes on GitHub.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <div className="flex justify-end gap-3 mt-4">
+          <div className="mt-4 flex justify-end gap-3">
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
+              disabled={removing}
               onClick={(e) => {
                 e.preventDefault();
-                executeDelete();
+                executeRemove();
               }}
               className="bg-red-600 hover:bg-red-700"
             >

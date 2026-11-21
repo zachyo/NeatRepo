@@ -37,6 +37,9 @@ interface Folder {
 interface FolderPageData {
   folder: Folder;
   repos: Repo[];
+  hidden_private_count?: number;
+  ancestors?: { id: string; name: string }[];
+  subfolders?: { id: string; name: string; icon?: string; repo_count: number }[];
 }
 
 interface PageProps {
@@ -97,20 +100,44 @@ export default function PublicFolderPage({ params }: PageProps) {
       );
     }
 
-    const { folder, repos } = data;
+    const {
+      folder,
+      repos,
+      hidden_private_count: hiddenCount = 0,
+      ancestors = [],
+      subfolders = [],
+    } = data as FolderPageData;
+    const parent = ancestors[ancestors.length - 1];
 
     return (
       <div className="max-w-6xl mx-auto px-4 py-8 md:py-12 space-y-8 flex-1 w-full">
         {/* Breadcrumb Back */}
-        <div>
+        <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1.5 text-sm text-gray-500">
           <Link
-            href={`/p/${username}`}
-            className="inline-flex items-center text-sm font-medium text-gray-500 hover:text-blue-600 transition-colors"
+            href={parent ? `/p/${username}/folders/${parent.id}` : `/p/${username}`}
+            aria-label={parent ? `Back to ${parent.name}` : "Back to profile"}
+            className="inline-flex items-center font-medium hover:text-blue-600 transition-colors"
           >
             <ArrowLeft className="w-4 h-4 mr-1.5" />
-            Back to profile
+            {ancestors.length === 0 && "Back to profile"}
           </Link>
-        </div>
+          {ancestors.map((ancestor) => (
+            <span key={ancestor.id} className="inline-flex items-center gap-1.5">
+              <Link
+                href={`/p/${username}/folders/${ancestor.id}`}
+                className="font-medium hover:text-blue-600 transition-colors"
+              >
+                {ancestor.name}
+              </Link>
+              <span aria-hidden>/</span>
+            </span>
+          ))}
+          {ancestors.length > 0 && (
+            <span aria-current="page" className="font-medium text-gray-900">
+              {folder.name}
+            </span>
+          )}
+        </nav>
 
         {/* Folder Header */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
@@ -127,9 +154,42 @@ export default function PublicFolderPage({ params }: PageProps) {
             <p className="text-sm text-gray-500 mt-2 flex items-center gap-2">
               <GitBranch className="w-4 h-4" />
               {repos.length} repositor{repos.length === 1 ? "y" : "ies"}
+              {hiddenCount > 0 && (
+                <span>
+                  · {hiddenCount} private {hiddenCount === 1 ? "repo" : "repos"} hidden
+                </span>
+              )}
             </p>
           </div>
         </div>
+
+        {/* Subfolders */}
+        {subfolders.length > 0 && (
+          <section aria-label="Subfolders">
+            <h2 className="text-lg font-semibold text-gray-900 mb-3">Subfolders</h2>
+            <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {subfolders.map((subfolder) => (
+                <li key={subfolder.id}>
+                  <Link
+                    href={`/p/${username}/folders/${subfolder.id}`}
+                    className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 transition-colors hover:border-blue-300"
+                  >
+                    <span className="text-xl" aria-hidden>
+                      {subfolder.icon || "📁"}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate font-medium text-gray-900">
+                      {subfolder.name}
+                    </span>
+                    <span className="inline-flex items-center gap-1 text-sm tabular-nums text-gray-500">
+                      <GitBranch className="w-3.5 h-3.5" />
+                      {subfolder.repo_count}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         {/* Repositories Table */}
         <Card className="bg-white border-gray-200 shadow-sm overflow-hidden">

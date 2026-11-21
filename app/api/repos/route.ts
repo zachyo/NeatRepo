@@ -10,21 +10,13 @@ import {
 } from "@/lib/github";
 import { firstIssue, repoAddSchema } from "@/lib/validation";
 
-const PAGE_SIZE = 15;
-const DATE_RANGES = new Set(["7d", "30d", "1y", "all"]);
-
-/**
- * Strips characters that have meaning inside a PostgREST `or=(...)` filter
- * (`,` `(` `)` `.` `:`) or inside an ILIKE pattern (`%` `_` `*` `\`), so user
- * input cannot break the filter or inject extra clauses.
- */
-function sanitizeSearch(raw: string): string {
-  return raw
-    .replace(/[,().:%_*\\"']/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 100);
-}
+import {
+  REPO_PAGE_SIZE as PAGE_SIZE,
+  applyRepoFilters,
+  applyRepoSort,
+  parseRepoFilters,
+  repoSelect,
+} from "@/lib/repo-query";
 
 export async function GET(req: NextRequest) {
   const supabase = createAdminClient();
@@ -36,70 +28,33 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = new URL(req.url);
-    const search = sanitizeSearch(searchParams.get("search") || "");
-    const folderId = searchParams.get("folder_id");
-    const language = searchParams.get("language");
-    const minStars = Number.parseInt(searchParams.get("min_stars") || "", 10);
-    const dateRange = searchParams.get("date_range");
+    const filters = parseRepoFilters(searchParams);
     const page = Math.max(1, Number.parseInt(searchParams.get("page") || "1", 10) || 1);
     const offset = (page - 1) * PAGE_SIZE;
 
-    let query = supabase
+    const base = supabase
       .from("repositories")
-      .select("*", { count: "exact" })
-      .eq("user_id", userId)
-      .order("updated_at", { ascending: false });
-
-    if (search) {
-      query = query.or(`name.ilike.*${search}*,description.ilike.*${search}*`);
-    }
-
-    if (language) {
-      query = query.eq("language", language.slice(0, 50));
-    }
-
-    if (Number.isFinite(minStars) && minStars > 0) {
-      query = query.gte("stars", minStars);
-    }
-
-    if (dateRange && DATE_RANGES.has(dateRange) && dateRange !== "all") {
-      const date = new Date();
-      if (dateRange === "7d") date.setDate(date.getDate() - 7);
-      else if (dateRange === "30d") date.setDate(date.getDate() - 30);
-      else if (dateRange === "1y") date.setFullYear(date.getFullYear() - 1);
-      query = query.gte("updated_at", date.toISOString());
-    }
-
-    if (folderId && folderId !== "all") {
-      // Only honour folders the user owns
-      const { data: folder } = await supabase
-        .from("folders")
-        .select("id, folder_repos(repo_id)")
-        .eq("id", folderId)
-        .eq("created_by", userId)
-        .maybeSingle();
-
-      const repoIds: string[] =
-        (folder?.folder_repos as { repo_id: string }[] | undefined)?.map(
-          (fr) => fr.repo_id,
-        ) || [];
-
-      if (repoIds.length === 0) {
-        return NextResponse.json({ repos: [], total: 0, page, limit: PAGE_SIZE });
-      }
-      query = query.in("id", repoIds);
-    }
+      .select(repoSelect(filters), { count: "exact" })
+      .eq("user_id", userId);
 
     const {
       data: repos,
       error,
       count,
-    } = await query.range(offset, offset + PAGE_SIZE - 1);
+    } = await applyRepoSort(applyRepoFilters(base, filters), filters.sort).range(
+      offset,
+      offset + PAGE_SIZE - 1,
+    );
 
     if (error) throw error;
 
+    // The folder filter's join is not part of a repository row.
+    const rows = ((repos ?? []) as unknown as Record<string, unknown>[]).map(
+      ({ folder_repos: _join, ...repo }) => repo,
+    );
+
     return NextResponse.json({
-      repos: repos || [],
+      repos: rows,
       total: count || 0,
       page,
       limit: PAGE_SIZE,

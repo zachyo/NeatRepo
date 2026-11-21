@@ -1,15 +1,33 @@
+import { useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useQueryCall } from "./useQuery";
 
 type options = {
   queryParams?: { [key: string]: string };
   enabled?: boolean;
 };
-export const useRepositories = (options?: options) =>
+
+/** `scope` keeps separately filtered lists from sharing one cache entry. */
+export const useRepositories = (options?: options, scope = "all") =>
   useQueryCall({
-    queryKey: "repositories",
+    queryKey: ["repositories", scope],
     url: "/api/repos",
     options,
   });
+
+/** Refreshes everything that shows folders, repos, or their counts. */
+export function useInvalidateRepoData() {
+  const queryClient = useQueryClient();
+  return useCallback(
+    () =>
+      Promise.all(
+        ["folders", "folder", "repositories", "repoStats"].map((key) =>
+          queryClient.invalidateQueries({ queryKey: [key] }),
+        ),
+      ),
+    [queryClient],
+  );
+}
 
 export const useFolders = (options?: options) =>
   useQueryCall({
@@ -56,6 +74,13 @@ export const useUser = (options?: options) =>
   useQueryCall({
     queryKey: ["user"],
     url: "/api/user",
+    options,
+  });
+
+export const useRepoStats = (options?: options) =>
+  useQueryCall({
+    queryKey: ["repoStats"],
+    url: "/api/repos/stats",
     options,
   });
 

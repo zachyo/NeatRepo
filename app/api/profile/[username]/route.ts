@@ -24,14 +24,35 @@ export async function GET(
     );
   }
 
-  // Fetch public folders with their repo counts
-  const { data: folders } = await supabase
+  // Top-level public folders with their repo counts. Subfolders are listed on
+  // their parent's page, so a private parent hides everything beneath it.
+  const { data: folderRows } = await supabase
     .from("folders")
-    .select("id, name, icon, is_pinned, created_at, folder_repos(count)")
+    .select("id, name, icon, is_pinned, created_at")
     .eq("created_by", user.id)
     .eq("is_public", true)
+    .is("parent_id", null)
     .order("is_pinned", { ascending: false })
     .order("created_at", { ascending: false });
+
+  // Count only public repos, so a folder never reveals how many private
+  // repos it holds.
+  const folderIds = (folderRows ?? []).map((f) => f.id);
+  const publicCounts = new Map<string, number>();
+  if (folderIds.length > 0) {
+    const { data: links } = await supabase
+      .from("folder_repos")
+      .select("folder_id, repositories!inner(private)")
+      .in("folder_id", folderIds)
+      .eq("repositories.private", false);
+    for (const link of links ?? []) {
+      publicCounts.set(link.folder_id, (publicCounts.get(link.folder_id) ?? 0) + 1);
+    }
+  }
+  const folders = (folderRows ?? []).map((f) => ({
+    ...f,
+    folder_repos: [{ count: publicCounts.get(f.id) ?? 0 }],
+  }));
 
   // Fetch favorited repos
   const { data: favoriteRepos } = await supabase

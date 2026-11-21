@@ -1,8 +1,28 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { firstIssue, folderAddRepoSchema } from "@/lib/validation";
+import { chunk } from "@/lib/repo-query";
+import {
+  firstIssue,
+  folderAddRepoSchema,
+  folderRemoveReposSchema,
+} from "@/lib/validation";
 
+async function ownsFolder(
+  supabase: ReturnType<typeof createAdminClient>,
+  folderId: string,
+  userId: string,
+) {
+  const { data } = await supabase
+    .from("folders")
+    .select("id")
+    .eq("id", folderId)
+    .eq("created_by", userId)
+    .maybeSingle();
+  return !!data;
+}
+
+/** Adds one or many of the user's repositories. Existing links are kept. */
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ folderId: string }> },
@@ -16,61 +36,54 @@ export async function POST(
     }
 
     const { folderId } = await params;
-    const parsed = folderAddRepoSchema.safeParse(await req.json());
+    const parsed = folderAddRepoSchema.safeParse(await req.json().catch(() => null));
     if (!parsed.success) {
       return NextResponse.json({ error: firstIssue(parsed.error) }, { status: 400 });
     }
-    const { repoId } = parsed.data;
+    const repoIds = parsed.data;
 
-    // Verify folder access
-    const { data: folder } = await supabase
-      .from("folders")
-      .select("id")
-      .eq("id", folderId)
-      .eq("created_by", userId)
-      .single();
-
-    if (!folder) {
+    if (!(await ownsFolder(supabase, folderId, userId))) {
       return NextResponse.json({ error: "Folder not found" }, { status: 404 });
     }
 
-    // Verify the repo belongs to the user
-    const { data: repo } = await supabase
-      .from("repositories")
-      .select("id")
-      .eq("id", repoId)
-      .eq("user_id", userId)
-      .maybeSingle();
+    // Every repo must belong to the user
+    const ownership = await Promise.all(
+      chunk(repoIds).map((ids) =>
+        supabase
+          .from("repositories")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", userId)
+          .in("id", ids),
+      ),
+    );
 
-    if (!repo) {
+    let owned = 0;
+    for (const { count, error } of ownership) {
+      if (error) throw error;
+      owned += count ?? 0;
+    }
+
+    if (owned !== repoIds.length) {
       return NextResponse.json({ error: "Repository not found" }, { status: 404 });
     }
 
-    // Add repo to folder
     const { data, error } = await supabase
       .from("folder_repos")
-      .insert([
-        {
-          folder_id: folderId,
-          repo_id: repoId,
-        },
-      ])
-      .select()
-      .single();
+      .upsert(
+        repoIds.map((repoId) => ({ folder_id: folderId, repo_id: repoId })),
+        { onConflict: "folder_id,repo_id", ignoreDuplicates: true },
+      )
+      .select("repo_id");
 
-    if (error) {
-      if (error.code === "23505") {
-        return NextResponse.json(
-          { error: "Repo already in folder" },
-          { status: 409 },
-        );
-      }
-      throw error;
-    }
+    if (error) throw error;
 
-    return NextResponse.json(data, { status: 201 });
+    const added = data?.length ?? 0;
+    return NextResponse.json(
+      { added, skipped: repoIds.length - added },
+      { status: 201 },
+    );
   } catch (error) {
-    console.error("Error adding repo to folder:", error);
+    console.error("Error adding repos to folder:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 },
@@ -78,6 +91,7 @@ export async function POST(
   }
 }
 
+/** Removes repositories, given as `?repoId=` or a `{ repoIds }` body. */
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ folderId: string }> },
@@ -91,39 +105,35 @@ export async function DELETE(
     }
 
     const { folderId } = await params;
-    const { searchParams } = new URL(req.url);
-    const repoId = searchParams.get("repoId");
+    const single = new URL(req.url).searchParams.get("repoId");
+    const parsed = folderRemoveReposSchema.safeParse(
+      single ? { repoIds: [single] } : await req.json().catch(() => null),
+    );
 
-    if (!repoId) {
-      return NextResponse.json(
-        { error: "Repo ID is required" },
-        { status: 400 },
-      );
+    if (!parsed.success) {
+      return NextResponse.json({ error: firstIssue(parsed.error) }, { status: 400 });
     }
 
-    // Verify folder access
-    const { data: folder } = await supabase
-      .from("folders")
-      .select("id")
-      .eq("id", folderId)
-      .eq("created_by", userId)
-      .single();
-
-    if (!folder) {
+    if (!(await ownsFolder(supabase, folderId, userId))) {
       return NextResponse.json({ error: "Folder not found" }, { status: 404 });
     }
 
-    const { error } = await supabase
-      .from("folder_repos")
-      .delete()
-      .eq("folder_id", folderId)
-      .eq("repo_id", repoId);
+    const results = await Promise.all(
+      chunk([...new Set(parsed.data.repoIds)]).map((ids) =>
+        supabase
+          .from("folder_repos")
+          .delete()
+          .eq("folder_id", folderId)
+          .in("repo_id", ids),
+      ),
+    );
 
-    if (error) throw error;
+    const failed = results.find((result) => result.error);
+    if (failed) throw failed.error;
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Error removing repo from folder:", error);
+    console.error("Error removing repos from folder:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 },

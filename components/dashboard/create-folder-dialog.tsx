@@ -19,12 +19,16 @@ interface CreateFolderDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreateFolder: (name: string, isPublic: boolean) => Promise<void>;
+  title?: string;
+  description?: string;
 }
 
 export default function CreateFolderDialog({
   open,
   onOpenChange,
   onCreateFolder,
+  title = 'Create New Folder',
+  description = 'Create a new folder to organize your repositories',
 }: CreateFolderDialogProps) {
   const [folderName, setFolderName] = useState('');
   const [isPublic, setIsPublic] = useState(false);
@@ -50,10 +54,8 @@ export default function CreateFolderDialog({
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent className="max-w-sm">
         <AlertDialogHeader>
-          <AlertDialogTitle>Create New Folder</AlertDialogTitle>
-          <AlertDialogDescription>
-            Create a new folder to organize your repositories
-          </AlertDialogDescription>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         
         <div className="space-y-4">

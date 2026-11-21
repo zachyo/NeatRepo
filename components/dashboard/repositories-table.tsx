@@ -1,8 +1,21 @@
 "use client";
 
 import { useState } from "react";
-import { Card } from "@/components/ui/card";
+import {
+  Eye,
+  Folder,
+  FolderMinus,
+  GitBranch,
+  Loader2,
+  MoreVertical,
+  Star,
+  StarOff,
+  X,
+} from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { ContextMenuItem } from "@/components/ui/context-menu";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,42 +23,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  GitBranch,
-  MoreVertical,
-  Star,
-  Eye,
-  EyeOff,
-  Loader2,
-  Folder,
-  Lock,
-} from "lucide-react";
-import AddRepoToFolderDialog from "./add-repo-to-folder-dialog";
-import { cn } from "@/lib/utils";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
+import { apiSend, errorMessage } from "@/lib/api-client";
+import { cn } from "@/lib/utils";
+import { useInvalidateRepoData } from "@/hooks/queries";
+import { useViewMode } from "@/hooks/use-view-mode";
+import AddRepoToFolderDialog from "./add-repo-to-folder-dialog";
+import RepoCollection, { ViewToggle, type Repo } from "./repo-collection";
+import TablePagination from "./table-pagination";
 
-export interface Repo {
-  id: string;
-  description?: string;
-  language?: string;
-  github_repo_id: number;
-  user_id: string;
-  name: string;
-  full_name: string;
-  url: string;
-  private: boolean;
-  stars: number;
-  forks: number;
-  updated_at: string;
-  synced_at: string;
-  is_favorite?: boolean;
-}
-
-interface Folder {
-  id: string;
-  name: string;
-}
+export type { Repo } from "./repo-collection";
 
 interface RepositoriesTableProps {
   repos: Repo[];
@@ -54,11 +41,17 @@ interface RepositoriesTableProps {
   onPageChange: (page: number) => void;
   totalItems: number;
   itemsPerPage: number;
-  folders: Folder[];
-  onReposUpdate: () => void;
+  folders: { id: string; name: string; parent_id?: string | null; position?: number }[];
   search: string;
   refetching: boolean;
   onToggleFavorite?: (repo: Repo) => void;
+  /** Current filters. A change clears the selection. */
+  filterParams: Record<string, string>;
+  /** Set when the list is filtered to one folder, enabling bulk removal. */
+  activeFolderId?: string | null;
+  containerId?: string;
+  emptyTitle?: string;
+  emptyDescription?: string;
 }
 
 export default function RepositoriesTable({
@@ -69,95 +62,124 @@ export default function RepositoriesTable({
   totalItems,
   itemsPerPage,
   folders,
-  onReposUpdate,
   search,
   refetching,
   onToggleFavorite,
+  filterParams,
+  activeFolderId,
+  containerId = "repositories",
+  emptyTitle = "No repositories here yet",
+  emptyDescription = "Repositories sync from GitHub automatically. You can also run a sync from Settings.",
 }: RepositoriesTableProps) {
-  const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set());
-  const [actionRepos, setActionRepos] = useState<Repo[]>([]);
-  const [showAddDialog, setShowAddDialog] = useState(false);
+  const invalidate = useInvalidateRepoData();
+  const [view, setView] = useViewMode();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [dialogRepoIds, setDialogRepoIds] = useState<string[]>([]);
+  const [dialogLabel, setDialogLabel] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  const handleSelectAll = (checked: boolean) => {
-    if (checked) {
-      const newSelected = new Set(repos.map((r) => r.id));
-      setSelectedRepos(newSelected);
-    } else {
-      setSelectedRepos(new Set());
-    }
-  };
-
-  const handleSelectRepo = (repoId: string, checked: boolean) => {
-    const newSelected = new Set(selectedRepos);
-    if (checked) {
-      newSelected.add(repoId);
-    } else {
-      newSelected.delete(repoId);
-    }
-    setSelectedRepos(newSelected);
-  };
+  // A selection only makes sense for the filters it was made under.
+  const filterKey = JSON.stringify(filterParams);
+  const [selectionFilterKey, setSelectionFilterKey] = useState(filterKey);
+  if (selectionFilterKey !== filterKey) {
+    setSelectionFilterKey(filterKey);
+    setSelected(new Set());
+  }
 
   const totalPages = Math.ceil(totalItems / itemsPerPage);
+  const pageSelected = repos.length > 0 && repos.every((repo) => selected.has(repo.id));
+  const canSelectMore = pageSelected && selected.size < totalItems;
+
+  const handleSelect = (repoId: string, checked: boolean) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (checked) next.add(repoId);
+      else next.delete(repoId);
+      return next;
+    });
+  };
+
+  const handleSelectPage = (checked: boolean) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      for (const repo of repos) {
+        if (checked) next.add(repo.id);
+        else next.delete(repo.id);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllMatching = async () => {
+    try {
+      setBusy(true);
+      const response = await fetch(`/api/repos/ids?${new URLSearchParams(filterParams)}`);
+      if (!response.ok) throw new Error("Could not select all repositories");
+      const { ids, capped } = await response.json();
+      setSelected(new Set(ids));
+      if (capped) toast.info(`Selected the first ${ids.length.toLocaleString()} repositories`);
+    } catch (error) {
+      toast.error(errorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openAddDialog = (repoIds: string[], label: string) => {
+    setDialogLabel(label);
+    setDialogRepoIds(repoIds);
+  };
+
+  const runBulk = async (action: () => Promise<unknown>, success: string) => {
+    try {
+      setBusy(true);
+      await action();
+      await invalidate();
+      setSelected(new Set());
+      toast.success(success);
+    } catch (error) {
+      toast.error(errorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const count = selected.size;
+  const countLabel = `${count.toLocaleString()} ${count === 1 ? "repository" : "repositories"}`;
+
+  const setFavorite = (isFavorite: boolean) =>
+    runBulk(
+      () =>
+        apiSend("/api/repos/bulk", "PATCH", {
+          repoIds: [...selected],
+          is_favorite: isFavorite,
+        }),
+      isFavorite ? `Favorited ${countLabel}` : `Unfavorited ${countLabel}`,
+    );
+
+  const removeFromFolder = () =>
+    runBulk(
+      () =>
+        apiSend(`/api/folders/${activeFolderId}/repos`, "DELETE", {
+          repoIds: [...selected],
+        }),
+      `Removed ${countLabel} from this folder`,
+    );
 
   if (loading && repos.length === 0) {
     return (
-      <Card className="overflow-hidden rounded-xl border-gray-200 bg-white shadow-none">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="border-b border-gray-200 bg-gray-50/80">
-              <tr>
-                <th className="px-6 py-3 text-left w-12">
-                  <Skeleton className="w-4 h-4 rounded" />
-                </th>
-                <th className="px-6 py-3 text-left w-1/3">
-                  <Skeleton className="w-24 h-4" />
-                </th>
-                <th className="px-6 py-3 text-left">
-                  <Skeleton className="w-16 h-4" />
-                </th>
-                <th className="px-6 py-3 text-left">
-                  <Skeleton className="w-12 h-4" />
-                </th>
-                <th className="px-6 py-3 text-left">
-                  <Skeleton className="w-16 h-4" />
-                </th>
-                <th className="px-6 py-3 text-right">
-                  <Skeleton className="w-8 h-4 ml-auto" />
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {[1, 2, 3, 4, 5].map((i) => (
-                <tr key={i}>
-                  <td className="px-6 py-4">
-                    <Skeleton className="w-4 h-4 rounded" />
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <Skeleton className="w-8 h-8 rounded-lg" />
-                      <div className="space-y-2">
-                        <Skeleton className="w-32 h-4" />
-                        <Skeleton className="w-48 h-3" />
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <Skeleton className="w-20 h-4" />
-                  </td>
-                  <td className="px-6 py-4">
-                    <Skeleton className="w-10 h-4" />
-                  </td>
-                  <td className="px-6 py-4">
-                    <Skeleton className="w-16 h-5 rounded-full" />
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <Skeleton className="w-8 h-8 rounded-md ml-auto" />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <Card className="space-y-4 rounded-xl border-gray-200 bg-white p-6 shadow-none">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <div key={i} className="flex items-center gap-4">
+            <Skeleton className="size-4 rounded" />
+            <Skeleton className="size-8 rounded-lg" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-3 w-64 max-w-full" />
+            </div>
+            <Skeleton className="h-5 w-16 rounded-full" />
+          </div>
+        ))}
       </Card>
     );
   }
@@ -170,12 +192,10 @@ export default function RepositoriesTable({
             <GitBranch className="size-6 text-gray-400" />
           </div>
           <p className="font-medium text-gray-900">
-            {search ? `No repositories match "${search}"` : "No repositories here yet"}
+            {search ? `No repositories match "${search}"` : emptyTitle}
           </p>
           <p className="mt-1 max-w-sm text-pretty text-sm text-gray-500">
-            {search
-              ? "Try a different search term or clear your filters."
-              : "Repositories sync from GitHub automatically. You can also run a sync from Settings."}
+            {search ? "Try a different search term or clear your filters." : emptyDescription}
           </p>
         </div>
       </Card>
@@ -184,236 +204,160 @@ export default function RepositoriesTable({
 
   return (
     <>
-      {selectedRepos.size > 0 && (
-        <div className="mb-3 flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5">
-          <span className="text-sm font-medium tabular-nums text-blue-800">
-            {selectedRepos.size}{" "}
-            {selectedRepos.size === 1 ? "repository" : "repositories"} selected
-          </span>
-          <Button
-            size="sm"
-            className="bg-blue-600 hover:bg-blue-700"
-            onClick={() => {
-              const reposToAdd = repos.filter((r) => selectedRepos.has(r.id));
-              setActionRepos(reposToAdd);
-              setShowAddDialog(true);
-            }}
-          >
-            <Folder className="w-4 h-4 mr-2" />
-            Add to folder
-          </Button>
+      <div className="mb-3 flex min-h-9 items-center justify-between gap-3">
+        <div aria-live="polite" className="flex items-center gap-2 text-xs text-gray-500">
+          {refetching && (
+            <>
+              <Loader2 className="size-3.5 animate-spin" />
+              Updating
+            </>
+          )}
+        </div>
+        <ViewToggle view={view} onChange={setView} />
+      </div>
+
+      {count > 0 && (
+        <div className="mb-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="mr-auto text-sm font-medium tabular-nums text-blue-800">
+              {countLabel} selected
+            </span>
+            <Button
+              size="sm"
+              disabled={busy}
+              className="bg-blue-600 hover:bg-blue-700"
+              onClick={() => openAddDialog([...selected], countLabel)}
+            >
+              <Folder className="mr-2 size-4" />
+              Add to folder
+            </Button>
+            {activeFolderId && (
+              <Button size="sm" variant="outline" disabled={busy} onClick={removeFromFolder}>
+                <FolderMinus className="mr-2 size-4" />
+                Remove from folder
+              </Button>
+            )}
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => setFavorite(true)}>
+              <Star className="mr-2 size-4" />
+              Favorite
+            </Button>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => setFavorite(false)}>
+              <StarOff className="mr-2 size-4" />
+              Unfavorite
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-label="Clear selection"
+              className="size-9 p-0"
+              onClick={() => setSelected(new Set())}
+            >
+              <X className="size-4" />
+            </Button>
+          </div>
+          {canSelectMore && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={handleSelectAllMatching}
+              className="mt-1 text-sm font-medium text-blue-700 underline-offset-2 hover:underline disabled:opacity-60"
+            >
+              Select all {totalItems.toLocaleString()} matching repositories
+            </button>
+          )}
         </div>
       )}
 
-      <Card className="relative overflow-hidden rounded-xl border-gray-200 bg-white shadow-none">
-        {refetching && (
-          <div
-            role="status"
-            aria-label="Updating"
-            className="absolute inset-x-0 top-0 z-10 flex justify-center pt-16"
-          >
-            <span className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1 text-xs text-gray-600 shadow-sm">
-              <Loader2 className="size-3.5 animate-spin" />
-              Updating
-            </span>
-          </div>
-        )}
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="border-b border-gray-200 bg-gray-50/80">
-              <tr>
-                <th className="px-6 py-3 text-left w-12">
-                  <Checkbox
-                    checked={
-                      repos.length > 0 && selectedRepos.size === repos.length
-                    }
-                    onCheckedChange={handleSelectAll}
-                    aria-label="Select all"
-                  />
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500">
-                  Repository
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500">
-                  Owner
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500">
-                  Stars
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500">
-                  Language
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody
-              className={cn(
-                "divide-y divide-gray-100 transition-opacity",
-                refetching && "opacity-50",
-              )}
-            >
-
-              {repos.map((repo) => (
-                <tr
-                  key={repo.id}
-                  className={cn(
-                    "transition-colors hover:bg-gray-50",
-                    selectedRepos.has(repo.id) && "bg-blue-50/50 hover:bg-blue-50/70",
-                  )}
+      <RepoCollection
+        repos={repos}
+        view={view}
+        containerId={containerId}
+        selected={selected}
+        onSelect={handleSelect}
+        onSelectPage={handleSelectPage}
+        dimmed={refetching}
+        renderActions={(repo) => (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="size-8 p-0 text-gray-500"
+                aria-label={`Actions for ${repo.name}`}
+              >
+                <MoreVertical className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuItem
+                onClick={() => openAddDialog([repo.id], repo.name)}
+                className="cursor-pointer"
+              >
+                <Folder className="mr-2 size-4" />
+                Add to folder
+              </DropdownMenuItem>
+              {onToggleFavorite && (
+                <DropdownMenuItem
+                  onClick={() => onToggleFavorite(repo)}
+                  className="cursor-pointer"
                 >
-                  <td className="px-6 py-4">
-                    <Checkbox
-                      checked={selectedRepos.has(repo.id)}
-                      onCheckedChange={(checked) =>
-                        handleSelectRepo(repo.id, !!checked)
-                      }
-                      aria-label={`Select ${repo.name}`}
-                    />
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gray-100">
-                        <GitBranch className="size-4 text-gray-600" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <a
-                            href={repo.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="truncate font-medium text-gray-900 hover:text-blue-600 hover:underline"
-                          >
-                            {repo.name}
-                          </a>
-                          {repo.private && (
-                            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-gray-200 px-1.5 py-px text-[11px] text-gray-500">
-                              <Lock className="size-2.5" />
-                              Private
-                            </span>
-                          )}
-                          {repo.is_favorite && (
-                            <Star
-                              aria-label="Favorite"
-                              className="size-3.5 shrink-0 fill-amber-400 text-amber-500"
-                            />
-                          )}
-                        </div>
-                        {repo.description && (
-                          <p className="max-w-xs truncate text-sm text-gray-500">
-                            {repo.description}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-600">
-                    {repo.full_name?.split("/")[0]}
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-1 text-sm tabular-nums text-gray-600">
-                      <Star className="size-3.5 text-gray-400" />
-                      {(repo.stars || 0).toLocaleString()}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    {repo.language ? (
-                      <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700">
-                        {repo.language}
-                      </span>
-                    ) : (
-                      <span className="text-sm text-gray-400">—</span>
+                  <Star
+                    className={cn(
+                      "mr-2 size-4",
+                      repo.is_favorite && "fill-amber-400 text-amber-500",
                     )}
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="size-8 p-0 text-gray-500"
-                          aria-label={`Actions for ${repo.name}`}
-                        >
-                          <MoreVertical className="w-4 h-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-48">
-                        <DropdownMenuItem
-                          onClick={() => {
-                            setActionRepos([repo]);
-                            setShowAddDialog(true);
-                          }}
-                          className="cursor-pointer hover:!bg-gray-100 hover:!text-gray-900 mb-1"
-                        >
-                          <GitBranch className="w-4 h-4 mr-2" />
-                          Add to folder
-                        </DropdownMenuItem>
-                        {onToggleFavorite && (
-                          <DropdownMenuItem
-                            onClick={() => onToggleFavorite(repo)}
-                            className="cursor-pointer hover:!bg-gray-100 hover:!text-gray-900"
-                          >
-                            <Star
-                              className={cn("mr-2 size-4", repo.is_favorite && "fill-amber-400 text-amber-500")}
-                            />
-                            {repo.is_favorite
-                              ? "Remove from favorites"
-                              : "Add to favorites"}
-                          </DropdownMenuItem>
-                        )}
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          onClick={() => window.open(repo.url, "_blank")}
-                          className="cursor-pointer hover:!bg-gray-100 hover:!text-gray-900 mt-1"
-                        >
-                          <Eye className="w-4 h-4 mr-2" />
-                          Open on GitHub
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between border-t border-gray-200 px-6 py-3">
-            <p className="text-sm tabular-nums text-gray-500">
-              Page {page} of {totalPages} · {totalItems.toLocaleString()} repositories
-            </p>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page === 1}
-                onClick={() => onPageChange(page - 1)}
+                  />
+                  {repo.is_favorite ? "Remove from favorites" : "Add to favorites"}
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => window.open(repo.url, "_blank", "noopener,noreferrer")}
+                className="cursor-pointer"
               >
-                Previous
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page === totalPages}
-                onClick={() => onPageChange(page + 1)}
-              >
-                Next
-              </Button>
-            </div>
-          </div>
+                <Eye className="mr-2 size-4" />
+                Open on GitHub
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
-      </Card>
+        renderMenuItems={(repo) => (
+          <>
+            <ContextMenuItem onSelect={() => openAddDialog([repo.id], repo.name)}>
+              <Folder className="mr-2 size-4" />
+              Add to folder
+            </ContextMenuItem>
+            {onToggleFavorite && (
+              <ContextMenuItem onSelect={() => onToggleFavorite(repo)}>
+                <Star className="mr-2 size-4" />
+                {repo.is_favorite ? "Remove from favorites" : "Add to favorites"}
+              </ContextMenuItem>
+            )}
+            <ContextMenuItem
+              onSelect={() => window.open(repo.url, "_blank", "noopener,noreferrer")}
+            >
+              <Eye className="mr-2 size-4" />
+              Open on GitHub
+            </ContextMenuItem>
+          </>
+        )}
+      />
 
-      {/* Add to Folder Dialog */}
+      <TablePagination
+        className="mt-3"
+        page={page}
+        totalPages={totalPages}
+        totalItems={totalItems}
+        onPageChange={onPageChange}
+      />
+
       <AddRepoToFolderDialog
-        open={showAddDialog}
-        onOpenChange={setShowAddDialog}
-        repos={actionRepos}
+        open={dialogRepoIds.length > 0}
+        onOpenChange={(open) => !open && setDialogRepoIds([])}
+        repoIds={dialogRepoIds}
+        label={dialogLabel}
         folders={folders}
-        onSuccess={onReposUpdate}
+        onSuccess={() => setSelected(new Set())}
       />
     </>
   );

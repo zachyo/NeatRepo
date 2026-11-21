@@ -12,9 +12,12 @@ import {
   X,
   GitBranch,
   Clock,
+  FolderSearch,
 } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
-import { useUser } from "@/hooks/queries";
+import { DashboardDndProvider } from "@/components/dashboard/dnd-provider";
+import FolderTree from "@/components/dashboard/folder-tree";
+import { useRepoStats, useUser } from "@/hooks/queries";
 import { cn } from "@/lib/utils";
 
 export const HeaderContext = createContext<{
@@ -29,6 +32,7 @@ const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
   { icon: Folder, label: "Folders", href: "/dashboard/folders" },
   { icon: GitBranch, label: "Repositories", href: "/dashboard/repos" },
+  { icon: FolderSearch, label: "Uncategorized", href: "/dashboard/uncategorized" },
   { icon: Clock, label: "Recents", href: "/dashboard/recents" },
   { icon: Settings, label: "Settings", href: "/dashboard/settings" },
 ];
@@ -42,6 +46,7 @@ export default function DashboardLayout({
   const [dynamicTitle, setDynamicTitle] = useState("");
   const pathname = usePathname();
   const { data: user } = useUser();
+  const { data: repoStats } = useRepoStats();
 
   // "/dashboard" only matches exactly; other sections also match their sub-pages
   const isActive = (href: string) =>
@@ -61,6 +66,7 @@ export default function DashboardLayout({
     <HeaderContext.Provider
       value={{ headerTitle: dynamicTitle, setHeaderTitle: setDynamicTitle }}
     >
+      <DashboardDndProvider>
       <div className="min-h-dvh bg-gray-50/50">
         {/* Mobile top bar */}
         <div className="fixed inset-x-0 top-0 z-30 flex h-14 items-center justify-between border-b border-gray-200 bg-white px-4 pt-[env(safe-area-inset-top)] md:hidden">
@@ -89,9 +95,12 @@ export default function DashboardLayout({
             <Logo href="/dashboard" />
           </div>
 
-          <nav aria-label="Main" className="flex-1 space-y-0.5 px-3 py-4">
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
+          <nav aria-label="Main" className="space-y-0.5">
             {navItems.map(({ icon: Icon, label, href }) => {
               const active = isActive(href);
+              const badge =
+                href === "/dashboard/uncategorized" ? repoStats?.uncategorized : undefined;
               return (
                 <Link
                   key={href}
@@ -108,10 +117,17 @@ export default function DashboardLayout({
                 >
                   <Icon className={cn("size-4", active ? "text-blue-600" : "text-gray-400")} />
                   {label}
+                  {badge > 0 && (
+                    <span className="ml-auto rounded-full bg-gray-100 px-2 py-0.5 text-xs tabular-nums text-gray-600">
+                      {badge.toLocaleString()}
+                    </span>
+                  )}
                 </Link>
               );
             })}
           </nav>
+          <FolderTree onNavigate={() => setSidebarOpen(false)} />
+          </div>
 
           <div className="border-t border-gray-200 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
             <div className="flex items-center gap-3 rounded-lg px-2 py-2">
@@ -168,6 +184,7 @@ export default function DashboardLayout({
           />
         )}
       </div>
+      </DashboardDndProvider>
     </HeaderContext.Provider>
   );
 }
