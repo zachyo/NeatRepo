@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
@@ -9,6 +10,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { buildTree, flattenTree } from "@/lib/folder-tree";
+import { UNCATEGORIZED_FOLDER } from "@/lib/repo-query";
 import { useRepoLanguages } from "@/hooks/queries";
 
 export interface RepoFilterValues {
@@ -17,6 +20,7 @@ export interface RepoFilterValues {
   language: string;
   date: string;
   stars: string;
+  sort: string;
 }
 
 export const DEFAULT_REPO_FILTERS: RepoFilterValues = {
@@ -25,12 +29,15 @@ export const DEFAULT_REPO_FILTERS: RepoFilterValues = {
   language: "all",
   date: "all",
   stars: "all",
+  sort: "updated",
 };
 
 interface RepoFiltersProps {
   values: RepoFilterValues;
   onChange: (next: Partial<RepoFilterValues>) => void;
-  folders: { id: string; name: string }[];
+  folders: { id: string; name: string; parent_id?: string | null; position?: number }[];
+  /** Hides the folder filter on pages that are already scoped to one view. */
+  hideFolderFilter?: boolean;
   /** Extra controls rendered at the end of the search row (e.g. an Add button). */
   actions?: React.ReactNode;
 }
@@ -40,14 +47,17 @@ export default function RepoFilters({
   values,
   onChange,
   folders,
+  hideFolderFilter = false,
   actions,
 }: RepoFiltersProps) {
   const { data: languagesData } = useRepoLanguages();
   const languages: string[] = Array.isArray(languagesData) ? languagesData : [];
+  const folderOptions = useMemo(() => flattenTree(buildTree(folders)), [folders]);
 
-  const activeCount = (["folder", "language", "date", "stars"] as const).filter(
-    (k) => values[k] !== "all",
-  ).length;
+  const filterKeys = hideFolderFilter
+    ? (["language", "date", "stars"] as const)
+    : (["folder", "language", "date", "stars"] as const);
+  const activeCount = filterKeys.filter((k) => values[k] !== "all").length;
 
   return (
     <div className="space-y-3">
@@ -67,19 +77,22 @@ export default function RepoFilters({
       </div>
 
       <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
-        <Select value={values.folder} onValueChange={(v) => onChange({ folder: v })}>
-          <SelectTrigger aria-label="Filter by folder" className="h-9 w-full bg-white sm:w-[160px]">
-            <SelectValue placeholder="All folders" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All folders</SelectItem>
-            {folders.map((folder) => (
-              <SelectItem key={folder.id} value={folder.id}>
-                {folder.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {!hideFolderFilter && (
+          <Select value={values.folder} onValueChange={(v) => onChange({ folder: v })}>
+            <SelectTrigger aria-label="Filter by folder" className="h-9 w-full bg-white sm:w-[160px]">
+              <SelectValue placeholder="All folders" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All folders</SelectItem>
+              <SelectItem value={UNCATEGORIZED_FOLDER}>Not in any folder</SelectItem>
+              {folderOptions.map((folder) => (
+                <SelectItem key={folder.id} value={folder.id}>
+                  <span style={{ paddingLeft: `${folder.depth * 0.75}rem` }}>{folder.name}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
 
         <Select value={values.language} onValueChange={(v) => onChange({ language: v })}>
           <SelectTrigger aria-label="Filter by language" className="h-9 w-full bg-white sm:w-[160px]">
@@ -120,13 +133,29 @@ export default function RepoFilters({
           </SelectContent>
         </Select>
 
+        <Select value={values.sort} onValueChange={(v) => onChange({ sort: v })}>
+          <SelectTrigger aria-label="Sort repositories" className="h-9 w-full bg-white sm:w-[170px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="updated">Recently updated</SelectItem>
+            <SelectItem value="stars">Most stars</SelectItem>
+            <SelectItem value="name">Name</SelectItem>
+          </SelectContent>
+        </Select>
+
         {activeCount > 0 && (
           <button
             type="button"
             onClick={() =>
-              onChange({ folder: "all", language: "all", date: "all", stars: "all" })
+              onChange({
+                ...(!hideFolderFilter && { folder: "all" }),
+                language: "all",
+                date: "all",
+                stars: "all",
+              })
             }
-            className="col-span-2 inline-flex h-9 items-center justify-center gap-1 sm:justify-start rounded-md px-2.5 text-sm text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900"
+            className="col-span-2 inline-flex h-9 items-center justify-center gap-1 rounded-md px-2.5 text-sm text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 sm:justify-start"
           >
             <X className="size-3.5" />
             Clear filters

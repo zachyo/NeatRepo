@@ -1,7 +1,13 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { firstIssue, folderUpdateSchema } from "@/lib/validation";
+import { getAncestors, isPubliclyVisible } from "@/lib/folder-tree";
+import { sortFolderRepos } from "@/lib/repo-query";
+import {
+  firstIssue,
+  folderUpdateSchema,
+  userFacingDbError,
+} from "@/lib/validation";
 
 export async function GET(
   req: NextRequest,
@@ -25,6 +31,7 @@ export async function GET(
     folder_repos (
       repo_id,
       added_at,
+      position,
       repositories (*)
     )
   `,
@@ -37,21 +44,28 @@ export async function GET(
       return NextResponse.json({ error: "Folder not found" }, { status: 404 });
     }
 
+    const { data: allFolders, error: treeError } = await supabase
+      .from("folders")
+      .select("id, name, parent_id, is_public")
+      .eq("created_by", userId);
+
+    if (treeError) throw treeError;
+
+    const tree = allFolders || [];
+
     await supabase
       .from("folders")
       .update({ last_opened: new Date().toISOString() })
       .eq("id", folderId)
       .eq("created_by", userId);
 
-    if (folder.folder_repos) {
-      folder.folder_repos.sort((a: any, b: any) => {
-        const dateA = new Date(a.repositories?.updated_at || 0).getTime();
-        const dateB = new Date(b.repositories?.updated_at || 0).getTime();
-        return dateB - dateA;
-      });
-    }
-
-    return NextResponse.json(folder);
+    return NextResponse.json({
+      ...folder,
+      folder_repos: sortFolderRepos(folder.folder_repos || [], folder.repo_sort),
+      ancestors: getAncestors(tree, folderId).map(({ id, name }) => ({ id, name })),
+      // False when this folder or any folder above it is private
+      publicly_visible: isPubliclyVisible(tree, folderId),
+    });
   } catch (error) {
     console.error("Error fetching folder:", error);
     return NextResponse.json(
@@ -78,8 +92,9 @@ export async function PUT(
     if (!parsed.success) {
       return NextResponse.json({ error: firstIssue(parsed.error) }, { status: 400 });
     }
-    const { name, icon, is_pinned, is_public } = parsed.data;
+    const { name, icon, is_pinned, is_public, parent_id, repo_sort } = parsed.data;
 
+    // Ownership, cycles and depth are enforced by the folders_validate_parent trigger
     const { data, error } = await supabase
       .from("folders")
       .update({
@@ -87,6 +102,8 @@ export async function PUT(
         ...(icon !== undefined && { icon }),
         ...(is_pinned !== undefined && { is_pinned }),
         ...(is_public !== undefined && { is_public }),
+        ...(parent_id !== undefined && { parent_id }),
+        ...(repo_sort !== undefined && { repo_sort }),
         updated_at: new Date().toISOString(),
       })
       .eq("id", folderId)
@@ -94,7 +111,11 @@ export async function PUT(
       .select()
       .maybeSingle();
 
-    if (error) throw error;
+    if (error) {
+      const message = userFacingDbError(error);
+      if (message) return NextResponse.json({ error: message }, { status: 400 });
+      throw error;
+    }
     if (!data) {
       return NextResponse.json({ error: "Folder not found" }, { status: 404 });
     }
@@ -109,6 +130,7 @@ export async function PUT(
   }
 }
 
+/** Deletes a folder. Its subfolders move up to its parent. */
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ folderId: string }> },
@@ -123,15 +145,13 @@ export async function DELETE(
 
     const { folderId } = await params;
 
-    const { data, error } = await supabase
-      .from("folders")
-      .delete()
-      .eq("id", folderId)
-      .eq("created_by", userId)
-      .select("id");
+    const { data: deleted, error } = await supabase.rpc(
+      "delete_folder_keep_children",
+      { p_user_id: userId, p_folder_id: folderId },
+    );
 
     if (error) throw error;
-    if (!data || data.length === 0) {
+    if (!deleted) {
       return NextResponse.json({ error: "Folder not found" }, { status: 404 });
     }
 

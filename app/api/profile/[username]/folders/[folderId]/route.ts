@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { NextRequest, NextResponse } from "next/server";
+import { getAncestors, isPubliclyVisible } from "@/lib/folder-tree";
 
 export async function GET(
   req: NextRequest,
@@ -24,16 +25,22 @@ export async function GET(
     );
   }
 
-  // 2. Fetch the folder, only if it belongs to this user and is public
-  const { data: folder, error: folderError } = await supabase
+  // 2. Load the hierarchy: a folder is only visible when every ancestor is public
+  const { data: allFolders, error: treeError } = await supabase
     .from("folders")
-    .select("id, name, icon, is_pinned, created_at")
-    .eq("id", folderId)
-    .eq("created_by", user.id)
-    .eq("is_public", true)
-    .maybeSingle();
+    .select(
+      "id, name, icon, parent_id, position, is_public, is_pinned, created_at, folder_repos(count)",
+    )
+    .eq("created_by", user.id);
 
-  if (folderError || !folder) {
+  if (treeError) {
+    return NextResponse.json({ error: "Failed to fetch folder" }, { status: 500 });
+  }
+
+  const tree = allFolders || [];
+  const current = tree.find((f) => f.id === folderId);
+
+  if (!current || !isPubliclyVisible(tree, folderId)) {
     return NextResponse.json({ error: "Folder not found" }, { status: 404 });
   }
 
@@ -68,8 +75,24 @@ export async function GET(
   }
 
   return NextResponse.json({
-    folder,
+    folder: {
+      id: current.id,
+      name: current.name,
+      icon: current.icon,
+      is_pinned: current.is_pinned,
+      created_at: current.created_at,
+    },
     repos,
     hidden_private_count: Math.max(0, repoIds.length - repos.length),
+    ancestors: getAncestors(tree, folderId).map(({ id, name }) => ({ id, name })),
+    subfolders: tree
+      .filter((f) => f.parent_id === folderId && f.is_public)
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+      .map(({ id, name, icon, folder_repos }) => ({
+        id,
+        name,
+        icon,
+        repo_count: (folder_repos as unknown as { count: number }[])?.[0]?.count ?? 0,
+      })),
   });
 }

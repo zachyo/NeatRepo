@@ -21,6 +21,8 @@ interface EditFolderDialogProps {
   folderId: string;
   initialName: string;
   initialIsPublic?: boolean;
+  /** True when a private folder above this one keeps it off the public profile. */
+  hiddenByParent?: boolean;
   onEditFolder: (id: string, name: string, isPublic: boolean) => Promise<void>;
 }
 
@@ -30,6 +32,7 @@ export default function EditFolderDialog({
   folderId,
   initialName,
   initialIsPublic = false,
+  hiddenByParent = false,
   onEditFolder,
 }: EditFolderDialogProps) {
   const [folderName, setFolderName] = useState(initialName);
@@ -101,6 +104,11 @@ export default function EditFolderDialog({
               <p className="text-xs text-gray-500">
                 Show this folder on your public profile. Private repos stay hidden.
               </p>
+              {hiddenByParent && isPublic && (
+                <p className="text-xs font-medium text-amber-700">
+                  A private parent folder is hiding this folder from your profile.
+                </p>
+              )}
             </div>
             <Switch id="edit-folder-public" checked={isPublic} onCheckedChange={setIsPublic} />
           </div>

@@ -1,77 +1,28 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Plus, Folder, GitBranch, Github } from "lucide-react";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import CreateFolderDialog from "@/components/dashboard/create-folder-dialog";
 import DashboardStats from "@/components/dashboard/dashboard-stats";
 import RecentFolders from "@/components/dashboard/recent-folders";
-import RepositoriesTable from "@/components/dashboard/repositories-table";
-import RepoFilters from "@/components/dashboard/repo-filters";
-import CreateFolderDialog from "@/components/dashboard/create-folder-dialog";
-import { useFolders, useRepositories, useUser } from "@/hooks/queries";
-import { useDebouncedCallback } from "use-debounce-pro";
-import { toast } from "sonner";
+import RepoBrowser from "@/components/dashboard/repo-browser";
+import { apiSend, errorMessage } from "@/lib/api-client";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  useFolders,
+  useInvalidateRepoData,
+  useRepoStats,
+  useUser,
+} from "@/hooks/queries";
 
 export default function DashboardPage() {
   const [showCreateFolder, setShowCreateFolder] = useState(false);
+  const invalidate = useInvalidateRepoData();
 
-  const [reposPage, setReposPage] = useState(1);
-  const [reposSearch, setReposSearch] = useState("");
-  const [filterFolder, setFilterFolder] = useState("all");
-  const [filterLanguage, setFilterLanguage] = useState("all");
-  const [filterDate, setFilterDate] = useState("all");
-  const [filterStars, setFilterStars] = useState("all");
-
-  const {
-    data: foldersData,
-    refetch: refetchFolders,
-    isLoading: foldersLoading,
-  } = useFolders({
-    queryParams: { search: "" },
-  });
-
+  const { data: foldersData } = useFolders({ queryParams: { search: "" } });
   const { data: userData } = useUser();
+  const { data: stats } = useRepoStats();
 
-  const {
-    data: reposData,
-    isLoading,
-    refetch: refetchRepos,
-    isRefetching: isRefetchingRepos,
-  } = useRepositories({
-    queryParams: {
-      page: String(reposPage),
-      search: reposSearch,
-      ...(filterFolder !== "all" && { folder_id: filterFolder }),
-      ...(filterLanguage !== "all" && { language: filterLanguage }),
-      ...(filterDate !== "all" && { date_range: filterDate }),
-      ...(filterStars !== "all" && { min_stars: filterStars }),
-    },
-  });
-
-  const { run, isPending } = useDebouncedCallback(() => {
-    refetchRepos();
-  }, 500);
-
-  // console.log({ isPending: isPending(), isRefetchingRepos });
-
-  useEffect(() => {
-    run();
-  }, [
-    reposPage,
-    reposSearch,
-    filterFolder,
-    filterLanguage,
-    filterDate,
-    filterStars,
-  ]);
+  const folders = Array.isArray(foldersData) ? foldersData : [];
 
   // Full background re-sync with GitHub (resumable; continues while hasMore)
   useEffect(() => {
@@ -83,32 +34,22 @@ export default function DashboardPage() {
           const result = await res.json();
           if (!result.hasMore) break;
         }
-        refetchRepos();
-      } catch (e) {
+        invalidate();
+      } catch {
         // Silent fail for background sync
       }
     };
     runBackgroundSync();
-  }, []);
+  }, [invalidate]);
 
   const handleCreateFolder = async (name: string, isPublic = false) => {
     try {
-      const response = await fetch("/api/folders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, is_public: isPublic }),
-      });
-
-      if (response.ok) {
-        setShowCreateFolder(false);
-        refetchFolders();
-        toast.success("Folder created successfully");
-      } else {
-        toast.error("Failed to create folder");
-      }
+      await apiSend("/api/folders", "POST", { name, is_public: isPublic });
+      setShowCreateFolder(false);
+      await invalidate();
+      toast.success("Folder created successfully");
     } catch (error) {
-      console.error("Error creating folder:", error);
-      toast.error("An error occurred");
+      toast.error(errorMessage(error));
     }
   };
 
@@ -119,47 +60,15 @@ export default function DashboardPage() {
     e.preventDefault();
     e.stopPropagation();
     try {
-      const response = await fetch(`/api/folders/${folder.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ is_pinned: !folder.is_pinned }),
-      });
-
-      if (response.ok) {
-        refetchFolders();
-        toast.success(folder.is_pinned ? "Folder unpinned" : "Folder pinned");
-      } else {
-        toast.error("Failed to update folder");
-      }
+      await apiSend(`/api/folders/${folder.id}`, "PUT", { is_pinned: !folder.is_pinned });
+      await invalidate();
+      toast.success(folder.is_pinned ? "Folder unpinned" : "Folder pinned");
     } catch (error) {
-      console.error("Error toggling pin:", error);
-      toast.error("An error occurred");
+      toast.error(errorMessage(error));
     }
   };
 
-  const handleToggleFavorite = async (repo: any) => {
-    try {
-      const response = await fetch(`/api/repos/${repo.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ is_favorite: !repo.is_favorite }),
-      });
-
-      if (response.ok) {
-        refetchRepos();
-        toast.success(
-          repo.is_favorite ? "Removed from favorites" : "Added to favorites",
-        );
-      } else {
-        toast.error("Failed to update repository");
-      }
-    } catch (error) {
-      console.error("Error toggling favorite:", error);
-      toast.error("An error occurred");
-    }
-  };
-
-  const recentFolders = foldersData?.slice(0, 4);
+  const recentFolders = folders.slice(0, 4);
 
   return (
     <div className="mx-auto max-w-7xl space-y-8">
@@ -172,56 +81,22 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {/* Top Stats Cards */}
       <DashboardStats
-        totalFolders={foldersData?.length ?? 0}
-        totalRepos={reposData?.total ?? 0}
+        totalFolders={folders.length}
+        totalRepos={stats?.total ?? 0}
+        uncategorizedRepos={stats?.uncategorized ?? 0}
         onCreateFolder={() => setShowCreateFolder(true)}
       />
 
-      {/* Recent Folders */}
-      {recentFolders?.length > 0 && (
+      {recentFolders.length > 0 && (
         <RecentFolders folders={recentFolders} onTogglePin={handleTogglePin} />
       )}
 
-      {/* All Repositories */}
       <section className="space-y-3">
         <h2 className="text-base font-semibold text-gray-900">All repositories</h2>
-        <RepoFilters
-          values={{
-            search: reposSearch,
-            folder: filterFolder,
-            language: filterLanguage,
-            date: filterDate,
-            stars: filterStars,
-          }}
-          onChange={(next) => {
-            if (next.search !== undefined) setReposSearch(next.search);
-            if (next.folder !== undefined) setFilterFolder(next.folder);
-            if (next.language !== undefined) setFilterLanguage(next.language);
-            if (next.date !== undefined) setFilterDate(next.date);
-            if (next.stars !== undefined) setFilterStars(next.stars);
-            setReposPage(1);
-          }}
-          folders={foldersData ?? []}
-        />
-
-        <RepositoriesTable
-          repos={reposData?.repos ?? []}
-          loading={isLoading}
-          refetching={isRefetchingRepos}
-          search={reposSearch}
-          page={reposPage}
-          onPageChange={setReposPage}
-          totalItems={reposData?.total}
-          itemsPerPage={reposData?.limit}
-          folders={foldersData ?? []}
-          onReposUpdate={refetchRepos}
-          onToggleFavorite={handleToggleFavorite}
-        />
+        <RepoBrowser />
       </section>
 
-      {/* Create Folder Dialog */}
       <CreateFolderDialog
         open={showCreateFolder}
         onOpenChange={setShowCreateFolder}

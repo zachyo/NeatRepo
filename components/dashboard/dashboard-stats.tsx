@@ -1,8 +1,10 @@
-import { Plus, Folder, GitBranch } from "lucide-react";
+import Link from "next/link";
+import { Plus, Folder, FolderSearch, GitBranch } from "lucide-react";
 
 interface DashboardStatsProps {
   totalFolders: number;
   totalRepos: number;
+  uncategorizedRepos: number;
   onCreateFolder: () => void;
 }
 
@@ -16,7 +18,7 @@ function StatCard({
   icon: typeof Folder;
 }) {
   return (
-    <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-4 sm:p-5">
+    <div className="flex h-full items-center justify-between rounded-xl border border-gray-200 bg-white p-4 sm:p-5">
       <div>
         <p className="text-sm text-gray-500">{label}</p>
         <p className="mt-1 text-3xl font-semibold tabular-nums text-gray-900">
@@ -33,16 +35,23 @@ function StatCard({
 export default function DashboardStats({
   totalFolders,
   totalRepos,
+  uncategorizedRepos,
   onCreateFolder,
 }: DashboardStatsProps) {
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
+    <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
       <StatCard label="Folders" value={totalFolders} icon={Folder} />
       <StatCard label="Repositories" value={totalRepos} icon={GitBranch} />
+      <Link
+        href="/dashboard/uncategorized"
+        className="col-span-2 rounded-xl transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 lg:col-span-1"
+      >
+        <StatCard label="Not in any folder" value={uncategorizedRepos} icon={FolderSearch} />
+      </Link>
       <button
         type="button"
         onClick={onCreateFolder}
-        className="group col-span-2 flex items-center gap-4 rounded-xl sm:col-span-1 border border-dashed border-gray-300 bg-white p-5 text-left transition-colors hover:border-blue-400 hover:bg-blue-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 active:scale-[0.98]"
+        className="group col-span-2 flex items-center gap-4 rounded-xl border border-dashed border-gray-300 bg-white p-5 text-left transition-colors hover:border-blue-400 hover:bg-blue-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 active:scale-[0.98] lg:col-span-1"
       >
         <span className="flex size-10 items-center justify-center rounded-lg bg-gray-100 text-gray-600 transition-colors group-hover:bg-blue-600 group-hover:text-white">
           <Plus className="size-5" />

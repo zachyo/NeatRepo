@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -10,73 +10,67 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Folder, Check } from "lucide-react";
-import { Repo } from "./repositories-table";
+import { Check, Folder } from "lucide-react";
 import { toast } from "sonner";
+import { apiSend, errorMessage } from "@/lib/api-client";
+import { buildTree, flattenTree } from "@/lib/folder-tree";
+import { useInvalidateRepoData } from "@/hooks/queries";
 
-interface Folder {
+interface PickerFolder {
   id: string;
   name: string;
+  parent_id?: string | null;
+  position?: number;
 }
 
 interface AddRepoToFolderDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  repos: Repo[];
-  folders: Folder[];
-  onSuccess: () => void;
+  repoIds: string[];
+  /** Repo name, or a count such as "12 repositories". */
+  label: string;
+  folders: PickerFolder[];
+  onSuccess?: () => void;
 }
 
 export default function AddRepoToFolderDialog({
   open,
   onOpenChange,
-  repos,
+  repoIds,
+  label,
   folders,
   onSuccess,
 }: AddRepoToFolderDialogProps) {
+  const invalidate = useInvalidateRepoData();
   const [loading, setLoading] = useState(false);
-  const [selectedFolders, setSelectedFolders] = useState<Set<string>>(
-    new Set(),
-  );
+  const [selectedFolders, setSelectedFolders] = useState<Set<string>>(new Set());
+  const options = useMemo(() => flattenTree(buildTree(folders)), [folders]);
 
   const handleToggleFolder = (folderId: string) => {
-    const newSelected = new Set(selectedFolders);
-    if (newSelected.has(folderId)) {
-      newSelected.delete(folderId);
-    } else {
-      newSelected.add(folderId);
-    }
-    setSelectedFolders(newSelected);
+    setSelectedFolders((current) => {
+      const next = new Set(current);
+      if (!next.delete(folderId)) next.add(folderId);
+      return next;
+    });
   };
 
   const handleAdd = async () => {
-    if (!repos || repos.length === 0 || selectedFolders.size === 0) return;
+    if (repoIds.length === 0 || selectedFolders.size === 0) return;
 
     try {
       setLoading(true);
-
-      // Add each repo to each selected folder
-      for (const folderId of selectedFolders) {
-        for (const repo of repos) {
-          await fetch(`/api/folders/${folderId}/repos`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ repoId: repo.id }),
-          });
-        }
-      }
-
-      onSuccess();
+      await Promise.all(
+        [...selectedFolders].map((folderId) =>
+          apiSend(`/api/folders/${folderId}/repos`, "POST", { repoIds }),
+        ),
+      );
+      await invalidate();
+      onSuccess?.();
       onOpenChange(false);
       setSelectedFolders(new Set());
-      toast.success(
-        repos.length > 1
-          ? `Added ${repos.length} repositories to folder(s)`
-          : "Added repository to folder(s)",
-      );
+      toast.success(`Added ${label} to ${selectedFolders.size === 1 ? "folder" : "folders"}`);
     } catch (error) {
-      console.error("Error adding repos to folder:", error);
-      toast.error("Failed to add to folder");
+      toast.error(errorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -88,63 +82,50 @@ export default function AddRepoToFolderDialog({
         <DialogHeader>
           <DialogTitle>Add to Folder</DialogTitle>
           <DialogDescription>
-            {repos && repos.length > 0 ? (
-              <span>
-                Add{" "}
-                <span className="font-semibold text-gray-900">
-                  {repos.length === 1
-                    ? repos[0].name
-                    : `${repos.length} repositories`}
-                </span>{" "}
-                to your folders
-              </span>
-            ) : (
-              "Select folders for your repositories"
-            )}
+            Add <span className="font-semibold text-gray-900">{label}</span> to your folders
           </DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="h-96 border border-gray-200 rounded-lg p-4">
-          {folders?.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center">
-              <Folder className="w-8 h-8 text-gray-300 mb-2" />
+        <ScrollArea className="h-80 rounded-lg border border-gray-200 p-2">
+          {options.length === 0 ? (
+            <div className="flex h-72 flex-col items-center justify-center text-center">
+              <Folder className="mb-2 size-8 text-gray-300" />
               <p className="text-sm text-gray-500">No folders yet</p>
-              <p className="text-xs text-gray-400">
-                Create a folder first to add repos
-              </p>
+              <p className="text-xs text-gray-500">Create a folder first to add repos</p>
             </div>
           ) : (
-            <div className=" grid grid-cols-2 gap-3">
-              {folders.map((folder) => (
-                <button
-                  key={folder.id}
-                  onClick={() => handleToggleFolder(folder.id)}
-                  className="w-full flex flex-row-reverse justify-between items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition text-left border border-gray-200"
-                >
-                  <div
-                    className={`w-4 h-4 rounded border-2 flex items-center justify-center transition ${
-                      selectedFolders.has(folder.id)
-                        ? "bg-blue-600 border-blue-600"
-                        : "border-gray-300"
-                    }`}
-                  >
-                    {selectedFolders.has(folder.id) && (
-                      <Check className="w-3 h-3 text-white" />
-                    )}
-                  </div>
-                  <div className="flex items-start flex-col gap-2">
-                    <Folder className="w-4 h-4 text-amber-500 flex-shrink-0 hidden" />
-                    <span className="font-medium text-gray-900 truncate max-w-28">
-                      {folder.name}
-                    </span>
-                  </div>
-                </button>
-              ))}
-            </div>
+            <ul>
+              {options.map((folder) => {
+                const checked = selectedFolders.has(folder.id);
+                return (
+                  <li key={folder.id}>
+                    <button
+                      type="button"
+                      role="checkbox"
+                      aria-checked={checked}
+                      onClick={() => handleToggleFolder(folder.id)}
+                      style={{ paddingLeft: `${0.5 + folder.depth * 0.875}rem` }}
+                      className="flex w-full items-center gap-2 rounded-md py-2 pr-2 text-left text-sm text-gray-800 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+                    >
+                      <Folder className="size-4 shrink-0 text-gray-400" />
+                      <span className="min-w-0 flex-1 truncate font-medium">{folder.name}</span>
+                      <span
+                        aria-hidden
+                        className={`flex size-4 shrink-0 items-center justify-center rounded border-2 transition-colors ${
+                          checked ? "border-blue-600 bg-blue-600" : "border-gray-300"
+                        }`}
+                      >
+                        {checked && <Check className="size-3 text-white" />}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
           )}
         </ScrollArea>
 
-        <div className="flex gap-3 justify-end pt-4">
+        <div className="flex justify-end gap-3 pt-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
